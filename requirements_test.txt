@@ -1,0 +1,28 @@
+# Dipendenze leggere per la test suite CI
+# NON include insightface/onnxruntime (pesanti, richiedono modelli ~300MB)
+# I moduli pesanti vengono mockati nei test via unittest.mock
+
+# FastAPI stack
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.0.0
+
+# HTTP client (usato da osint_engine.py)
+httpx>=0.27.0
+
+# Image processing
+Pillow>=10.0.0
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+
+# PDF generation (testato direttamente)
+reportlab>=4.1.0
+matplotlib>=3.8.0
+
+# WebSocket
+websockets>=12.0
+
+# Test runner
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
