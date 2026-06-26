@@ -1,6 +1,6 @@
 # face_recognition-ng
 
-> ⚡ Fork moderno di [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — stessa API semplice, backend aggiornato.
+> ⚡ Fork moderno di [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — stessa API semplice, backend aggiornato + OSINT integrato.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -19,7 +19,7 @@ Il progetto originale si basa su **dlib**, che presenta diversi problemi:
 - Nessun supporto nativo GPU
 - Modello del 2017, superato dalle soluzioni moderne
 
-Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo il backend con [InsightFace](https://github.com/deepinsight/insightface).
+Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo il backend con [InsightFace](https://github.com/deepinsight/insightface) e aggiungendo un **motore OSINT integrato**.
 
 ### Vantaggi rispetto all'originale
 
@@ -31,6 +31,7 @@ Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo
 - ✅ REST API HTTP integrata
 - ✅ Dashboard web con webcam live e stream RTSP
 - ✅ Database volti noti (SQLite)
+- ✅ **Motore OSINT**: reverse image search + social lookup + Maigret
 
 ---
 
@@ -40,6 +41,9 @@ Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo
 git clone https://github.com/Lorenzozero/face_recognition
 cd face_recognition
 pip install -r requirements_ng.txt
+
+# Opzionale: abilita Maigret per ricerca username su 3000+ siti
+pip install maigret
 ```
 
 Per il supporto GPU:
@@ -70,18 +74,75 @@ Interfaccia grafica accessibile dal browser, senza installare nulla di aggiuntiv
 - 📦 **Bounding box** — rettangoli colorati sui volti con nome e confidence score
 - 📸 **Registra volto** — cattura un frame e salva il volto nel database con un nome
 - 🗃️ **Gestione DB** — visualizza ed elimina i volti noti registrati
+- 🔍 **OSINT panel** — lancia ricerca OSINT su un volto riconosciuto direttamente dalla dashboard
 - 📊 **Log eventi** — storico dei riconoscimenti in tempo reale
+
+---
+
+## Motore OSINT (Fase 3)
+
+Dato un volto (immagine) e/o un nome, il motore OSINT esegue automaticamente:
+
+### Reverse Image Search
+
+| Motore | Descrizione |
+|--------|-------------|
+| **Google Lens** | Carica il volto e ottieni link diretto ai risultati visivi |
+| **Yandex Images** | Ottimo per profili russi/est-europei, molto preciso sui volti |
+| **TinEye** | Trova dove l'immagine è apparsa online in passato |
+| **PimEyes** | Il motore più potente per ricerca facciale (link apertura diretta) |
+| **Bing Visual Search** | Ricerca visiva Microsoft |
+
+### Social Media Lookup
+
+| Piattaforma | Metodo |
+|-------------|--------|
+| Instagram | Verifica profilo diretto + Google dork |
+| Twitter/X | Verifica profilo diretto + Google dork |
+| LinkedIn | Google dork `site:linkedin.com/in` |
+| Facebook | Google dork + verifica diretta |
+| TikTok | Verifica profilo diretto |
+| GitHub | Verifica profilo diretto |
+
+### Maigret — Username Discovery
+
+[Maigret](https://github.com/soxoj/maigret) cerca un username su **3000+ siti** simultaneamente.
+
+```python
+# Genera automaticamente varianti username dal nome completo
+# 'Mario Rossi' → ['mariorossi', 'mario.rossi', 'mario_rossi', 'mrossi', ...]
+```
+
+### Endpoint OSINT
+
+| Metodo | Endpoint | Descrizione |
+|--------|----------|-------------|
+| `POST` | `/osint/image` | Reverse image search del volto |
+| `POST` | `/osint/social` | Ricerca profili social per nome/username |
+| `POST` | `/osint/full` | Pipeline completa: immagine + nome + Maigret |
+
+### Esempio di utilizzo
+
+```bash
+# Pipeline OSINT completa
+curl -X POST http://localhost:8000/osint/full \
+  -H "Authorization: Bearer il_tuo_token" \
+  -F "name=Mario Rossi" \
+  -F "file=@foto.jpg" \
+  -F "run_maigret=true"
+
+# Solo ricerca social per nome
+curl -X POST http://localhost:8000/osint/social \
+  -H "Authorization: Bearer il_tuo_token" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Mario Rossi", "username": "mario_rossi", "run_maigret": false}'
+```
 
 ---
 
 ## REST API
 
-```bash
-FR_API_TOKEN=il_tuo_token python api_server.py
-# Swagger UI: http://localhost:8000/docs
-```
-
-### Endpoint HTTP
+### Endpoint HTTP completi
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
@@ -91,6 +152,9 @@ FR_API_TOKEN=il_tuo_token python api_server.py
 | `POST` | `/register` | Registra volto noto nel DB |
 | `GET`  | `/known` | Lista volti noti |
 | `DELETE` | `/known/{id}` | Elimina volto noto |
+| `POST` | `/osint/image` | Reverse image search |
+| `POST` | `/osint/social` | Ricerca social per nome/username |
+| `POST` | `/osint/full` | Pipeline OSINT completa |
 | `GET`  | `/health` | Health check |
 
 ### Endpoint WebSocket
@@ -137,10 +201,13 @@ face_recognition/
 │   └── backends/
 │       └── insightface_backend.py     # Backend InsightFace (sostituisce dlib)
 ├── dashboard/
-│   └── index.html                     # Dashboard web (webcam + RTSP + DB)
-├── api_server.py                      # Server FastAPI + WebSocket
-├── websocket_stream.py               # Gestore stream video WebSocket
+│   └── index.html                     # Dashboard web (webcam + RTSP + OSINT)
+├── api_server.py                      # Server FastAPI + WebSocket + OSINT
+├── websocket_stream.py                # Gestore stream video WebSocket
 ├── face_db.py                         # Database SQLite volti noti
+├── osint_engine.py                    # Reverse image search (Google Lens, Yandex, TinEye)
+├── social_lookup.py                   # Ricerca profili social + Google dorks
+├── maigret_wrapper.py                 # Wrapper Maigret per username discovery
 ├── requirements_ng.txt                # Dipendenze aggiornate
 └── examples/                          # Esempi di utilizzo
 ```
@@ -151,9 +218,15 @@ face_recognition/
 
 - [x] **Fase 1** — Sostituzione dlib → InsightFace, API compatibile
 - [x] **Fase 2** — REST API FastAPI con autenticazione token
+- [x] **Fase 3** — Motore OSINT: reverse image search + social lookup + Maigret
 - [x] **Fase 4** — Dashboard web con webcam live, stream RTSP, DB volti noti
-- [ ] **Fase 3** — Integrazione OSINT: dato un volto, cerca corrispondenze in profili pubblici ([Maigret](https://github.com/soxoj/maigret))
-- [ ] **Fase 5** — Generazione automatica report PDF
+- [ ] **Fase 5** — Generazione automatica report PDF con tutti i dati OSINT
+
+---
+
+## Note legali
+
+> ⚠️ **Uso responsabile**: questo strumento è destinato esclusivamente a ricerche legali (OSINT difensivo, pentesting autorizzato, ricerca accademica). L'uso per sorveglianza non autorizzata di persone fisiche può violare il GDPR e le leggi sulla privacy locali. Usare sempre nel rispetto della normativa vigente.
 
 ---
 
@@ -170,6 +243,9 @@ face_recognition/
 | Webcam live | ❌ No | ✅ WebSocket |
 | Stream RTSP | ❌ No | ✅ OpenCV |
 | Database volti | ❌ No | ✅ SQLite |
+| Reverse image search | ❌ No | ✅ Google Lens, Yandex, TinEye |
+| Social lookup | ❌ No | ✅ Instagram, Twitter, LinkedIn, FB, TikTok |
+| Username discovery | ❌ No | ✅ Maigret (3000+ siti) |
 | Installazione | Complessa (C++) | Semplice (pip) |
 
 ---
@@ -178,6 +254,7 @@ face_recognition/
 
 - Libreria originale: [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) di Adam Geitgey
 - Nuovo backend: [InsightFace](https://github.com/deepinsight/insightface)
+- OSINT username discovery: [Maigret](https://github.com/soxoj/maigret) di soxoj
 - Fork e nuove funzionalità: [Lorenzozero](https://github.com/Lorenzozero)
 
 ---
