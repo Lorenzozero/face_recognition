@@ -2,6 +2,7 @@
 
 > ⚡ Fork moderno di [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — stessa API semplice, backend aggiornato + OSINT integrato.
 
+[![CI](https://github.com/Lorenzozero/face_recognition/actions/workflows/ci.yml/badge.svg)](https://github.com/Lorenzozero/face_recognition/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Fork di ageitgey/face_recognition](https://img.shields.io/badge/fork-ageitgey%2Fface__recognition-lightgrey)](https://github.com/ageitgey/face_recognition)
@@ -32,6 +33,7 @@ Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo
 - ✅ Dashboard web con webcam live e stream RTSP
 - ✅ Database volti noti (SQLite)
 - ✅ **Motore OSINT**: reverse image search + social lookup + Maigret
+- ✅ **Report PDF** generato automaticamente con grafici e tabelle
 
 ---
 
@@ -74,7 +76,7 @@ Interfaccia grafica accessibile dal browser, senza installare nulla di aggiuntiv
 - 📦 **Bounding box** — rettangoli colorati sui volti con nome e confidence score
 - 📸 **Registra volto** — cattura un frame e salva il volto nel database con un nome
 - 🗃️ **Gestione DB** — visualizza ed elimina i volti noti registrati
-- 🔍 **OSINT panel** — lancia ricerca OSINT su un volto riconosciuto direttamente dalla dashboard
+- 📄 **Genera Report PDF** — form integrato per avviare la pipeline OSINT e scaricare il PDF
 - 📊 **Log eventi** — storico dei riconoscimenti in tempo reale
 
 ---
@@ -120,22 +122,25 @@ Dato un volto (immagine) e/o un nome, il motore OSINT esegue automaticamente:
 | `POST` | `/osint/image` | Reverse image search del volto |
 | `POST` | `/osint/social` | Ricerca profili social per nome/username |
 | `POST` | `/osint/full` | Pipeline completa: immagine + nome + Maigret |
+| `POST` | `/report/pdf` | Pipeline OSINT + genera PDF scaricabile |
 
 ### Esempio di utilizzo
 
 ```bash
-# Pipeline OSINT completa
+# Pipeline OSINT completa + PDF in un solo comando
+curl -X POST http://localhost:8000/report/pdf \
+  -H "Authorization: Bearer il_tuo_token" \
+  -F "name=Mario Rossi" \
+  -F "file=@foto.jpg" \
+  -F "run_maigret=false" \
+  --output report.pdf
+
+# Solo pipeline OSINT JSON
 curl -X POST http://localhost:8000/osint/full \
   -H "Authorization: Bearer il_tuo_token" \
   -F "name=Mario Rossi" \
   -F "file=@foto.jpg" \
   -F "run_maigret=true"
-
-# Solo ricerca social per nome
-curl -X POST http://localhost:8000/osint/social \
-  -H "Authorization: Bearer il_tuo_token" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Mario Rossi", "username": "mario_rossi", "run_maigret": false}'
 ```
 
 ---
@@ -154,7 +159,8 @@ curl -X POST http://localhost:8000/osint/social \
 | `DELETE` | `/known/{id}` | Elimina volto noto |
 | `POST` | `/osint/image` | Reverse image search |
 | `POST` | `/osint/social` | Ricerca social per nome/username |
-| `POST` | `/osint/full` | Pipeline OSINT completa |
+| `POST` | `/osint/full` | Pipeline OSINT completa (JSON) |
+| `POST` | `/report/pdf` | Pipeline OSINT + PDF scaricabile |
 | `GET`  | `/health` | Health check |
 
 ### Endpoint WebSocket
@@ -201,11 +207,17 @@ face_recognition/
 │   └── backends/
 │       └── insightface_backend.py     # Backend InsightFace (sostituisce dlib)
 ├── dashboard/
-│   └── index.html                     # Dashboard web (webcam + RTSP + OSINT)
+│   └── index.html                     # Dashboard web (webcam + RTSP + PDF report)
+├── tests/
+│   ├── conftest.py                    # Fixture condivise (TestClient, mock)
+│   ├── test_api_core.py               # Test endpoint core (encode, detect, compare)
+│   ├── test_api_osint.py              # Test endpoint OSINT
+│   └── test_report_pdf.py             # Test generatore PDF + endpoint /report/pdf
 ├── api_server.py                      # Server FastAPI + WebSocket + OSINT
+├── report_generator.py                # Generatore PDF OSINT (dark design)
 ├── websocket_stream.py                # Gestore stream video WebSocket
 ├── face_db.py                         # Database SQLite volti noti
-├── osint_engine.py                    # Reverse image search (Google Lens, Yandex, TinEye)
+├── osint_engine.py                    # Reverse image search
 ├── social_lookup.py                   # Ricerca profili social + Google dorks
 ├── maigret_wrapper.py                 # Wrapper Maigret per username discovery
 ├── requirements_ng.txt                # Dipendenze aggiornate
@@ -220,7 +232,8 @@ face_recognition/
 - [x] **Fase 2** — REST API FastAPI con autenticazione token
 - [x] **Fase 3** — Motore OSINT: reverse image search + social lookup + Maigret
 - [x] **Fase 4** — Dashboard web con webcam live, stream RTSP, DB volti noti
-- [ ] **Fase 5** — Generazione automatica report PDF con tutti i dati OSINT
+- [x] **Fase 5** — Generazione automatica report PDF con grafici e tabelle
+- [x] **Fase 6** — Test suite pytest + CI GitHub Actions (Python 3.10 / 3.11 / 3.12)
 
 ---
 
@@ -246,6 +259,9 @@ face_recognition/
 | Reverse image search | ❌ No | ✅ Google Lens, Yandex, TinEye |
 | Social lookup | ❌ No | ✅ Instagram, Twitter, LinkedIn, FB, TikTok |
 | Username discovery | ❌ No | ✅ Maigret (3000+ siti) |
+| Report PDF | ❌ No | ✅ Dark design + grafici |
+| Test suite | ❌ No | ✅ pytest (3.10 / 3.11 / 3.12) |
+| CI/CD | ❌ No | ✅ GitHub Actions |
 | Installazione | Complessa (C++) | Semplice (pip) |
 
 ---
