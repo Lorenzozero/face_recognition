@@ -1,104 +1,103 @@
 # face_recognition-ng
 
-> ⚡ A modern fork of [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — same simple API, modern backend.
+> ⚡ Fork moderno di [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) — stessa API semplice, backend aggiornato.
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Fork of ageitgey/face_recognition](https://img.shields.io/badge/fork-ageitgey%2Fface__recognition-lightgrey)](https://github.com/ageitgey/face_recognition)
+[![Fork di ageitgey/face_recognition](https://img.shields.io/badge/fork-ageitgey%2Fface__recognition-lightgrey)](https://github.com/ageitgey/face_recognition)
 
 ---
 
-## Why this fork?
+## Cos'è questo progetto?
 
-The original [face_recognition](https://github.com/ageitgey/face_recognition) by Adam Geitgey is one of the most starred facial recognition libraries on GitHub (50k+ ⭐). However it relies on **dlib**, which:
+**face_recognition-ng** è un fork di [face_recognition](https://github.com/ageitgey/face_recognition) di Adam Geitgey, una delle librerie di riconoscimento facciale più popolari su GitHub (50k+ ⭐).
 
-- Requires painful C++ compilation
-- Is broken on Python 3.12+
-- Lacks native GPU support
-- Uses a model from 2017
+Il progetto originale si basa su **dlib**, che presenta diversi problemi:
 
-This fork keeps the **exact same simple API** while replacing the backend with [InsightFace](https://github.com/deepinsight/insightface), a state-of-the-art face recognition library with:
+- Richiede una compilazione C++ lunga e spesso problematica
+- Non funziona su Python 3.12+
+- Nessun supporto nativo GPU
+- Modello del 2017, superato dalle soluzioni moderne
 
-- ✅ Python 3.9–3.12+ support
-- ✅ Native GPU (CUDA) support
-- ✅ +15% accuracy over dlib on standard benchmarks
-- ✅ No C++ compilation required
-- ✅ Drop-in replacement — zero code changes needed
+Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo il backend con [InsightFace](https://github.com/deepinsight/insightface), una libreria di riconoscimento facciale allo stato dell'arte.
+
+### Vantaggi rispetto all'originale
+
+- ✅ Compatibile con Python 3.9–3.12+
+- ✅ Supporto GPU nativo (CUDA) tramite ONNX Runtime
+- ✅ Accuratezza superiore del ~15% rispetto a dlib sui benchmark standard
+- ✅ Nessuna compilazione C++ richiesta
+- ✅ Drop-in replacement — zero modifiche al codice esistente
+- ✅ REST API HTTP integrata (nuova funzionalità)
 
 ---
 
-## Installation
+## Installazione
 
 ```bash
+git clone https://github.com/Lorenzozero/face_recognition
+cd face_recognition
 pip install -r requirements_ng.txt
 ```
 
-For GPU support:
+Per il supporto GPU:
 ```bash
-pip install onnxruntime-gpu  # instead of onnxruntime
+pip install onnxruntime-gpu  # al posto di onnxruntime
 ```
 
 ---
 
-## Usage (same API as original)
+## Utilizzo (API identica all'originale)
 
 ```python
 import face_recognition
 
-# Load images
-image_a = face_recognition.load_image_file("person_a.jpg")
-image_b = face_recognition.load_image_file("person_b.jpg")
+# Carica le immagini
+immagine_a = face_recognition.load_image_file("persona_a.jpg")
+immagine_b = face_recognition.load_image_file("persona_b.jpg")
 
-# Get face encodings
-encoding_a = face_recognition.face_encodings(image_a)[0]
-encoding_b = face_recognition.face_encodings(image_b)[0]
+# Calcola gli encoding facciali
+encoding_a = face_recognition.face_encodings(immagine_a)[0]
+encoding_b = face_recognition.face_encodings(immagine_b)[0]
 
-# Compare faces
-result = face_recognition.compare_faces([encoding_a], encoding_b)
-print(result)  # [True] or [False]
+# Confronta i volti
+risultato = face_recognition.compare_faces([encoding_a], encoding_b)
+print(risultato)  # [True] oppure [False]
 
-# Detect face locations
-locations = face_recognition.face_locations(image_a)
-print(locations)  # [(top, right, bottom, left), ...]
+# Rileva le posizioni dei volti
+posizioni = face_recognition.face_locations(immagine_a)
+print(posizioni)  # [(top, right, bottom, left), ...]
 ```
 
 ---
 
-## REST API (New in this fork)
+## REST API (nuova in questo fork)
 
-This fork ships a **FastAPI server** to expose all features over HTTP:
+Questo fork include un **server FastAPI** per esporre tutte le funzionalità via HTTP:
 
 ```bash
-python api_server.py
-# Swagger UI available at http://localhost:8000/docs
+FR_API_TOKEN=il_tuo_token python api_server.py
+# Swagger UI disponibile su http://localhost:8000/docs
 ```
 
-### Endpoints
+### Endpoint disponibili
 
-| Method | Endpoint | Description |
+| Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
-| `POST` | `/encode` | Upload an image, get face encodings |
-| `POST` | `/compare` | Compare two encodings, get similarity score |
-| `POST` | `/detect` | Detect faces, get bounding boxes |
-| `GET`  | `/health` | Health check |
+| `POST` | `/encode` | Carica un'immagine, ricevi encoding + bounding box |
+| `POST` | `/compare` | Confronta due encoding, ottieni score di similarità |
+| `POST` | `/detect` | Rileva volti, restituisce solo le bounding box (più veloce) |
+| `GET`  | `/health` | Controllo stato del server |
 
-### Example
+### Esempio con curl
 
 ```bash
 curl -X POST http://localhost:8000/encode \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -F "file=@photo.jpg"
+  -H "Authorization: Bearer il_tuo_token" \
+  -F "file=@foto.jpg"
 ```
 
----
-
-## Roadmap
-
-- [x] **Phase 1** — Replace dlib with InsightFace, keep API compatible
-- [x] **Phase 2** — FastAPI REST server with token auth
-- [ ] **Phase 3** — OSINT integration: match a face against scraped public profiles (Maigret integration)
-- [ ] **Phase 4** — Web dashboard (React/Next.js) with drag & drop, bounding boxes, confidence scores
-- [ ] **Phase 5** — PDF report generation from recognition results
+Autenticazione tramite header `Authorization: Bearer <token>`. Il token si imposta con la variabile d'ambiente `FR_API_TOKEN`.
 
 ---
 
@@ -106,19 +105,62 @@ curl -X POST http://localhost:8000/encode \
 
 ```bash
 docker build -t face-recognition-ng .
-docker run -p 8000:8000 face-recognition-ng
+docker run -p 8000:8000 -e FR_API_TOKEN=il_tuo_token face-recognition-ng
 ```
 
 ---
 
-## Credits
+## Roadmap
 
-- Original library: [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) by Adam Geitgey
-- New backend: [InsightFace](https://github.com/deepinsight/insightface)
-- Fork & new features: [Lorenzozero](https://github.com/Lorenzozero)
+Queste sono le modifiche pianificate rispetto al progetto originale:
+
+- [x] **Fase 1** — Sostituzione di dlib con InsightFace mantenendo la compatibilità API
+- [x] **Fase 2** — Server REST FastAPI con autenticazione token
+- [ ] **Fase 3** — Integrazione OSINT: dato un volto, cerca corrispondenze in profili pubblici (integrazione con [Maigret](https://github.com/soxoj/maigret))
+- [ ] **Fase 4** — Dashboard web (React/Next.js) con drag & drop, visualizzazione bounding box e confidence score
+- [ ] **Fase 5** — Generazione automatica di report PDF dai risultati del riconoscimento
 
 ---
 
-## License
+## Struttura del progetto
 
-MIT — see [LICENSE](LICENSE)
+```
+face_recognition/
+├── face_recognition/
+│   ├── __init__.py                    # Entry point, espone l'API pubblica
+│   └── backends/
+│       └── insightface_backend.py     # Nuovo backend InsightFace (sostituisce dlib)
+├── api_server.py                      # Server FastAPI REST (nuovo)
+├── requirements_ng.txt                # Dipendenze aggiornate (senza dlib)
+├── requirements.txt                   # Dipendenze originali (mantenute per compatibilità)
+├── Dockerfile                         # Docker support
+└── examples/                          # Esempi di utilizzo
+```
+
+---
+
+## Differenze rispetto all'originale
+
+| Caratteristica | ageitgey/face_recognition | face_recognition-ng (questo fork) |
+|---|---|---|
+| Backend | dlib (C++) | InsightFace (ONNX) |
+| Python 3.12+ | ❌ Rotto | ✅ Supportato |
+| GPU support | ❌ No | ✅ CUDA via ONNX Runtime |
+| Dimensione embedding | 128D | 512D (più accurato) |
+| REST API | ❌ No | ✅ FastAPI inclusa |
+| Installazione | Complessa (build C++) | Semplice (`pip install`) |
+| Compatibilità API | — | ✅ 100% compatibile |
+
+---
+
+## Crediti
+
+- Libreria originale: [ageitgey/face_recognition](https://github.com/ageitgey/face_recognition) di Adam Geitgey
+- Nuovo backend: [InsightFace](https://github.com/deepinsight/insightface)
+- Fork e nuove funzionalità: [Lorenzozero](https://github.com/Lorenzozero)
+
+---
+
+## Licenza
+
+MIT — vedi [LICENSE](LICENSE)
