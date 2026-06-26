@@ -19,16 +19,18 @@ Il progetto originale si basa su **dlib**, che presenta diversi problemi:
 - Nessun supporto nativo GPU
 - Modello del 2017, superato dalle soluzioni moderne
 
-Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo il backend con [InsightFace](https://github.com/deepinsight/insightface), una libreria di riconoscimento facciale allo stato dell'arte.
+Questo fork mantiene la **stessa API semplicissima** dell'originale, sostituendo il backend con [InsightFace](https://github.com/deepinsight/insightface).
 
 ### Vantaggi rispetto all'originale
 
 - ✅ Compatibile con Python 3.9–3.12+
 - ✅ Supporto GPU nativo (CUDA) tramite ONNX Runtime
-- ✅ Accuratezza superiore del ~15% rispetto a dlib sui benchmark standard
+- ✅ Accuratezza superiore del ~15% rispetto a dlib
 - ✅ Nessuna compilazione C++ richiesta
 - ✅ Drop-in replacement — zero modifiche al codice esistente
-- ✅ REST API HTTP integrata (nuova funzionalità)
+- ✅ REST API HTTP integrata
+- ✅ Dashboard web con webcam live e stream RTSP
+- ✅ Database volti noti (SQLite)
 
 ---
 
@@ -47,57 +49,73 @@ pip install onnxruntime-gpu  # al posto di onnxruntime
 
 ---
 
-## Utilizzo (API identica all'originale)
+## Avvio rapido
+
+```bash
+FR_API_TOKEN=il_tuo_token python api_server.py
+```
+
+Apri il browser su `http://localhost:8000` per la **dashboard web**.
+Swagger UI disponibile su `http://localhost:8000/docs`.
+
+---
+
+## Dashboard Web
+
+Interfaccia grafica accessibile dal browser, senza installare nulla di aggiuntivo.
+
+**Funzionalità:**
+- 📷 **Webcam live** — rilevamento e riconoscimento in tempo reale via WebSocket
+- 🎥 **Stream RTSP/IP camera** — connetti telecamere di rete (Hikvision, Dahua, ecc.)
+- 📦 **Bounding box** — rettangoli colorati sui volti con nome e confidence score
+- 📸 **Registra volto** — cattura un frame e salva il volto nel database con un nome
+- 🗃️ **Gestione DB** — visualizza ed elimina i volti noti registrati
+- 📊 **Log eventi** — storico dei riconoscimenti in tempo reale
+
+---
+
+## REST API
+
+```bash
+FR_API_TOKEN=il_tuo_token python api_server.py
+# Swagger UI: http://localhost:8000/docs
+```
+
+### Endpoint HTTP
+
+| Metodo | Endpoint | Descrizione |
+|--------|----------|-------------|
+| `POST` | `/encode` | Encoding facciale da immagine |
+| `POST` | `/detect` | Rilevamento volti (solo bounding box) |
+| `POST` | `/compare` | Confronto tra due encoding |
+| `POST` | `/register` | Registra volto noto nel DB |
+| `GET`  | `/known` | Lista volti noti |
+| `DELETE` | `/known/{id}` | Elimina volto noto |
+| `GET`  | `/health` | Health check |
+
+### Endpoint WebSocket
+
+| Endpoint | Descrizione |
+|----------|-------------|
+| `WS /ws/stream` | Stream webcam dal browser (frame JPEG base64) |
+| `WS /ws/rtsp?url=...` | Stream da IP camera o RTSP tramite OpenCV |
+
+---
+
+## Utilizzo API Python (compatibile con originale)
 
 ```python
 import face_recognition
 
-# Carica le immagini
 immagine_a = face_recognition.load_image_file("persona_a.jpg")
-immagine_b = face_recognition.load_image_file("persona_b.jpg")
-
-# Calcola gli encoding facciali
 encoding_a = face_recognition.face_encodings(immagine_a)[0]
+
+immagine_b = face_recognition.load_image_file("persona_b.jpg")
 encoding_b = face_recognition.face_encodings(immagine_b)[0]
 
-# Confronta i volti
 risultato = face_recognition.compare_faces([encoding_a], encoding_b)
 print(risultato)  # [True] oppure [False]
-
-# Rileva le posizioni dei volti
-posizioni = face_recognition.face_locations(immagine_a)
-print(posizioni)  # [(top, right, bottom, left), ...]
 ```
-
----
-
-## REST API (nuova in questo fork)
-
-Questo fork include un **server FastAPI** per esporre tutte le funzionalità via HTTP:
-
-```bash
-FR_API_TOKEN=il_tuo_token python api_server.py
-# Swagger UI disponibile su http://localhost:8000/docs
-```
-
-### Endpoint disponibili
-
-| Metodo | Endpoint | Descrizione |
-|--------|----------|-------------|
-| `POST` | `/encode` | Carica un'immagine, ricevi encoding + bounding box |
-| `POST` | `/compare` | Confronta due encoding, ottieni score di similarità |
-| `POST` | `/detect` | Rileva volti, restituisce solo le bounding box (più veloce) |
-| `GET`  | `/health` | Controllo stato del server |
-
-### Esempio con curl
-
-```bash
-curl -X POST http://localhost:8000/encode \
-  -H "Authorization: Bearer il_tuo_token" \
-  -F "file=@foto.jpg"
-```
-
-Autenticazione tramite header `Authorization: Bearer <token>`. Il token si imposta con la variabile d'ambiente `FR_API_TOKEN`.
 
 ---
 
@@ -110,46 +128,49 @@ docker run -p 8000:8000 -e FR_API_TOKEN=il_tuo_token face-recognition-ng
 
 ---
 
-## Roadmap
-
-Queste sono le modifiche pianificate rispetto al progetto originale:
-
-- [x] **Fase 1** — Sostituzione di dlib con InsightFace mantenendo la compatibilità API
-- [x] **Fase 2** — Server REST FastAPI con autenticazione token
-- [ ] **Fase 3** — Integrazione OSINT: dato un volto, cerca corrispondenze in profili pubblici (integrazione con [Maigret](https://github.com/soxoj/maigret))
-- [ ] **Fase 4** — Dashboard web (React/Next.js) con drag & drop, visualizzazione bounding box e confidence score
-- [ ] **Fase 5** — Generazione automatica di report PDF dai risultati del riconoscimento
-
----
-
 ## Struttura del progetto
 
 ```
 face_recognition/
 ├── face_recognition/
-│   ├── __init__.py                    # Entry point, espone l'API pubblica
+│   ├── __init__.py                    # Entry point API pubblica
 │   └── backends/
-│       └── insightface_backend.py     # Nuovo backend InsightFace (sostituisce dlib)
-├── api_server.py                      # Server FastAPI REST (nuovo)
-├── requirements_ng.txt                # Dipendenze aggiornate (senza dlib)
-├── requirements.txt                   # Dipendenze originali (mantenute per compatibilità)
-├── Dockerfile                         # Docker support
+│       └── insightface_backend.py     # Backend InsightFace (sostituisce dlib)
+├── dashboard/
+│   └── index.html                     # Dashboard web (webcam + RTSP + DB)
+├── api_server.py                      # Server FastAPI + WebSocket
+├── websocket_stream.py               # Gestore stream video WebSocket
+├── face_db.py                         # Database SQLite volti noti
+├── requirements_ng.txt                # Dipendenze aggiornate
 └── examples/                          # Esempi di utilizzo
 ```
 
 ---
 
+## Roadmap
+
+- [x] **Fase 1** — Sostituzione dlib → InsightFace, API compatibile
+- [x] **Fase 2** — REST API FastAPI con autenticazione token
+- [x] **Fase 4** — Dashboard web con webcam live, stream RTSP, DB volti noti
+- [ ] **Fase 3** — Integrazione OSINT: dato un volto, cerca corrispondenze in profili pubblici ([Maigret](https://github.com/soxoj/maigret))
+- [ ] **Fase 5** — Generazione automatica report PDF
+
+---
+
 ## Differenze rispetto all'originale
 
-| Caratteristica | ageitgey/face_recognition | face_recognition-ng (questo fork) |
+| Caratteristica | ageitgey/face_recognition | face_recognition-ng |
 |---|---|---|
 | Backend | dlib (C++) | InsightFace (ONNX) |
 | Python 3.12+ | ❌ Rotto | ✅ Supportato |
-| GPU support | ❌ No | ✅ CUDA via ONNX Runtime |
-| Dimensione embedding | 128D | 512D (più accurato) |
-| REST API | ❌ No | ✅ FastAPI inclusa |
-| Installazione | Complessa (build C++) | Semplice (`pip install`) |
-| Compatibilità API | — | ✅ 100% compatibile |
+| GPU support | ❌ No | ✅ CUDA |
+| Embedding | 128D | 512D |
+| REST API | ❌ No | ✅ FastAPI |
+| Dashboard web | ❌ No | ✅ Inclusa |
+| Webcam live | ❌ No | ✅ WebSocket |
+| Stream RTSP | ❌ No | ✅ OpenCV |
+| Database volti | ❌ No | ✅ SQLite |
+| Installazione | Complessa (C++) | Semplice (pip) |
 
 ---
 

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>face_recognition-ng — Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --text: #e2e8f0;
+      --muted: #8892b0;
+      --accent: #64ffda;
+      --accent2: #7c3aed;
+      --danger: #f87171;
+      --success: #4ade80;
+      --font: 'Inter', system-ui, sans-serif;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
+    header span { font-size: 0.75rem; color: var(--muted); }
+    .badge { background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.7rem; }
+    .badge.live { background: #14532d; border-color: var(--success); color: var(--success); }
+    .badge.offline { background: #450a0a; border-color: var(--danger); color: var(--danger); }
+    main { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; padding: 1.5rem 2rem; height: calc(100vh - 60px); }
+    .video-panel { display: flex; flex-direction: column; gap: 1rem; }
+    .canvas-wrapper {
+      position: relative; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 0.75rem; overflow: hidden; flex: 1; min-height: 0;
+    }
+    #videoEl { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #overlayCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .controls { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    button {
+      padding: 0.5rem 1.25rem; border-radius: 0.5rem; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text); font-size: 0.85rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: var(--accent); color: #0f1117; border-color: var(--accent); font-weight: 600; }
+    button.primary:hover { opacity: 0.85; }
+    button.danger { background: #450a0a; border-color: var(--danger); color: var(--danger); }
+    input[type=text] {
+      padding: 0.5rem 0.75rem; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 0.5rem; color: var(--text); font-size: 0.85rem; outline: none; flex: 1;
+    }
+    input[type=text]:focus { border-color: var(--accent); }
+    .sidebar { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem;
+    }
+    .card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.75rem; }
+    .stat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .stat-val { font-weight: 700; color: var(--accent); font-size: 1.4rem; }
+    #faceList { display: flex; flex-direction: column; gap: 0.5rem; max-height: 200px; overflow-y: auto; }
+    .face-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.4rem 0.6rem; background: var(--surface2); border-radius: 0.5rem; font-size: 0.82rem;
+    }
+    .face-item .name { font-weight: 500; }
+    .face-item .conf { color: var(--accent); font-size: 0.75rem; }
+    .face-item.unknown .name { color: var(--muted); }
+    .log { font-family: monospace; font-size: 0.75rem; color: var(--muted); max-height: 160px; overflow-y: auto; }
+    .log-entry { padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
+    .log-entry.match { color: var(--success); }
+    .log-entry.error { color: var(--danger); }
+    .rtsp-row { display: flex; gap: 0.5rem; }
+    .token-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    #knownList { display: flex; flex-direction: column; gap: 0.4rem; max-height: 180px; overflow-y: auto; }
+    .known-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.35rem 0.6rem; background: var(--surface2); border-radius: 0.4rem; font-size: 0.8rem;
+    }
+    .del-btn { color: var(--danger); cursor: pointer; font-size: 0.75rem; padding: 0.1rem 0.4rem; border: 1px solid var(--danger); border-radius: 0.3rem; background: none; }
+    .mode-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .mode-tab { flex: 1; padding: 0.4rem; text-align: center; border-radius: 0.4rem; border: 1px solid var(--border); cursor: pointer; font-size: 0.8rem; }
+    .mode-tab.active { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>⚡ face_recognition-ng</h1>
+  <div style="display:flex;gap:0.75rem;align-items:center">
+    <span id="statusBadge" class="badge offline">● Offline</span>
+    <span class="badge" id="fpsBadge">0 FPS</span>
+  </div>
+</header>
+
+<main>
+  <!-- Video Panel -->
+  <div class="video-panel">
+    <div class="canvas-wrapper">
+      <video id="videoEl" autoplay muted playsinline></video>
+      <canvas id="overlayCanvas"></canvas>
+    </div>
+    <div class="controls">
+      <button class="primary" id="startBtn" onclick="startWebcam()">▶ Avvia Webcam</button>
+      <button id="stopBtn" onclick="stopStream()" disabled>⏹ Stop</button>
+      <button onclick="captureAndRegister()">📸 Registra Volto</button>
+    </div>
+    <div class="rtsp-row">
+      <input type="text" id="rtspUrl" placeholder="rtsp://192.168.1.100:554/stream" />
+      <button onclick="startRTSP()">🎥 Connetti RTSP</button>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <!-- Config -->
+    <div class="card">
+      <h3>Configurazione</h3>
+      <div class="token-row">
+        <input type="text" id="tokenInput" placeholder="FR_API_TOKEN" value="changeme" />
+      </div>
+      <div class="stat-row"><span>Server</span><span style="color:var(--muted);font-size:0.8rem">localhost:8000</span></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card">
+      <h3>Statistiche Live</h3>
+      <div class="stat-row"><span>Volti rilevati</span><span class="stat-val" id="faceCount">0</span></div>
+      <div class="stat-row"><span>Riconosciuti</span><span style="color:var(--success);font-weight:600" id="matchCount">0</span></div>
+      <div id="faceList"></div>
+    </div>
+
+    <!-- Volti noti -->
+    <div class="card">
+      <h3>Volti Noti nel DB</h3>
+      <div id="knownList"><span style="color:var(--muted);font-size:0.8rem">Nessun volto registrato</span></div>
+      <button style="margin-top:0.75rem;width:100%" onclick="loadKnown()">🔄 Aggiorna lista</button>
+    </div>
+
+    <!-- Log -->
+    <div class="card">
+      <h3>Log eventi</h3>
+      <div class="log" id="eventLog"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+  let ws = null;
+  let stream = null;
+  let animFrame = null;
+  let lastFrameTime = Date.now();
+  let frameCount = 0;
+  let totalMatches = 0;
+  let streamMode = 'webcam'; // 'webcam' | 'rtsp'
+
+  const video = document.getElementById('videoEl');
+  const canvas = document.getElementById('overlayCanvas');
+  const ctx = canvas.getContext('2d');
+
+  function token() { return document.getElementById('tokenInput').value; }
+
+  function log(msg, type = '') {
+    const el = document.getElementById('eventLog');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry ' + type;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.prepend(entry);
+    if (el.children.length > 50) el.removeChild(el.lastChild);
+  }
+
+  function setStatus(live) {
+    const b = document.getElementById('statusBadge');
+    b.textContent = live ? '● Live' : '● Offline';
+    b.className = 'badge ' + (live ? 'live' : 'offline');
+  }
+
+  async function startWebcam() {
+    streamMode = 'webcam';
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+
+    const wsUrl = `ws://localhost:8000/ws/stream`;
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => { setStatus(true); log('WebSocket webcam connesso', 'match'); sendFrameLoop(); };
+    ws.onmessage = handleMessage;
+    ws.onerror = (e) => log('Errore WebSocket: ' + e, 'error');
+    ws.onclose = () => { setStatus(false); log('WebSocket disconnesso'); };
+  }
+
+  function startRTSP() {
+    const url = document.getElementById('rtspUrl').value.trim();
+    if (!url) return;
+    streamMode = 'rtsp';
+    video.srcObject = null;
+    video.style.display = 'none';
+
+    const wsUrl = `ws://localhost:8000/ws/rtsp?url=${encodeURIComponent(url)}`;
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => { setStatus(true); log('Connesso a stream RTSP: ' + url, 'match'); document.getElementById('stopBtn').disabled = false; };
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.error) { log(data.error, 'error'); return; }
+      // Mostra frame dal server
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        drawOverlay(data.faces, img.width, img.height);
+      };
+      img.src = data.frame;
+      updateStats(data.faces);
+    };
+    ws.onerror = (e) => log('Errore RTSP: ' + e, 'error');
+    ws.onclose = () => { setStatus(false); log('Stream RTSP disconnesso'); };
+  }
+
+  function sendFrameLoop() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = 640; offscreen.height = 360;
+    const c = offscreen.getContext('2d');
+    c.drawImage(video, 0, 0, 640, 360);
+    const frame = offscreen.toDataURL('image/jpeg', 0.7);
+    ws.send(JSON.stringify({ frame }));
+    // Aggiorna overlay
+    canvas.width = video.offsetWidth;
+    canvas.height = video.offsetHeight;
+    frameCount++;
+    const now = Date.now();
+    if (now - lastFrameTime >= 1000) {
+      document.getElementById('fpsBadge').textContent = frameCount + ' FPS';
+      frameCount = 0; lastFrameTime = now;
+    }
+    setTimeout(sendFrameLoop, 80); // ~12 FPS
+  }
+
+  function handleMessage(event) {
+    const data = JSON.parse(event.data);
+    if (data.error) { log(data.error, 'error'); return; }
+    drawOverlay(data.faces, video.videoWidth, video.videoHeight);
+    updateStats(data.faces);
+  }
+
+  function drawOverlay(faces, srcW, srcH) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const scaleX = canvas.width / (srcW || 640);
+    const scaleY = canvas.height / (srcH || 360);
+    faces.forEach(f => {
+      const x = f.left * scaleX, y = f.top * scaleY;
+      const w = (f.right - f.left) * scaleX, h = (f.bottom - f.top) * scaleY;
+      ctx.strokeStyle = f.matched ? '#64ffda' : '#f87171';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = f.matched ? 'rgba(100,255,218,0.85)' : 'rgba(248,113,113,0.85)';
+      ctx.fillRect(x, y - 22, w, 22);
+      ctx.fillStyle = '#0f1117';
+      ctx.font = 'bold 13px Inter, sans-serif';
+      const label = f.matched ? `${f.name} ${Math.round(f.confidence * 100)}%` : 'Sconosciuto';
+      ctx.fillText(label, x + 4, y - 6);
+    });
+  }
+
+  function updateStats(faces) {
+    document.getElementById('faceCount').textContent = faces.length;
+    const matches = faces.filter(f => f.matched);
+    document.getElementById('matchCount').textContent = matches.length;
+    const list = document.getElementById('faceList');
+    list.innerHTML = faces.map(f =>
+      `<div class="face-item ${f.matched ? '' : 'unknown'}">
+        <span class="name">${f.matched ? f.name : 'Sconosciuto'}</span>
+        <span class="conf">${f.matched ? Math.round(f.confidence * 100) + '%' : ''}</span>
+      </div>`
+    ).join('');
+    matches.forEach(f => {
+      totalMatches++;
+      if (totalMatches <= 200) log(`Match: ${f.name} (${Math.round(f.confidence * 100)}%)`, 'match');
+    });
+  }
+
+  function stopStream() {
+    if (ws) { ws.close(); ws = null; }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    setStatus(false);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+    document.getElementById('faceCount').textContent = '0';
+    document.getElementById('matchCount').textContent = '0';
+    log('Stream fermato');
+  }
+
+  async function captureAndRegister() {
+    const name = prompt('Nome da associare al volto:');
+    if (!name) return;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = 640; offscreen.height = 360;
+    offscreen.getContext('2d').drawImage(video, 0, 0, 640, 360);
+    const blob = await new Promise(r => offscreen.toBlob(r, 'image/jpeg', 0.9));
+    const form = new FormData();
+    form.append('file', blob, 'capture.jpg');
+    form.append('name', name);
+    const res = await fetch(`/register?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token() },
+      body: form,
+    });
+    const data = await res.json();
+    if (res.ok) { log(`Registrato: ${data.name} (ID ${data.id})`, 'match'); loadKnown(); }
+    else log('Errore registrazione: ' + (data.detail || res.status), 'error');
+  }
+
+  async function loadKnown() {
+    const res = await fetch('/known', { headers: { 'Authorization': 'Bearer ' + token() } });
+    if (!res.ok) { log('Errore caricamento volti noti', 'error'); return; }
+    const data = await res.json();
+    const list = document.getElementById('knownList');
+    if (!data.length) { list.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Nessun volto registrato</span>'; return; }
+    list.innerHTML = data.map(f =>
+      `<div class="known-item">
+        <span>${f.name}</span>
+        <button class="del-btn" onclick="deleteKnown(${f.id})">✕</button>
+      </div>`
+    ).join('');
+  }
+
+  async function deleteKnown(id) {
+    const res = await fetch(`/known/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token() },
+    });
+    if (res.ok) { log(`Volto ID ${id} eliminato`); loadKnown(); }
+    else log('Errore eliminazione', 'error');
+  }
+
+  // Init
+  loadKnown();
+  log('Dashboard caricata. Avvia la webcam o connetti uno stream RTSP.');
+</script>
+</body>
+</html>
