@@ -1,14 +1,14 @@
 """
-test_api_core.py — Test degli endpoint core dell'API REST.
+test_api_core.py — Test endpoint core: /health, /encode, /detect, /compare, /known, /known/{id}
 """
-import io
 import numpy as np
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+
+# ── /health ──────────────────────────────────────────────────────────────────────────
 
 def test_health(client):
-    """GET /health deve restituire 200 e versione."""
     r = client.get("/health")
     assert r.status_code == 200
     data = r.json()
@@ -16,43 +16,46 @@ def test_health(client):
     assert "version" in data
 
 
+# ── /encode ───────────────────────────────────────────────────────────────────────
+
 def test_encode_no_auth(client, sample_image_bytes):
-    """POST /encode senza token deve restituire 401."""
-    r = client.post("/encode", files={"file": ("test.jpg", sample_image_bytes, "image/jpeg")})
+    r = client.post("/encode", files={"file": ("t.jpg", sample_image_bytes, "image/jpeg")})
     assert r.status_code == 401
 
 
 def test_encode_with_auth(client, auth_headers, sample_image_bytes):
-    """POST /encode con token deve restituire encoding validi."""
     r = client.post(
         "/encode",
         headers=auth_headers,
-        files={"file": ("test.jpg", sample_image_bytes, "image/jpeg")},
+        files={"file": ("t.jpg", sample_image_bytes, "image/jpeg")},
     )
     assert r.status_code == 200
     data = r.json()
-    assert "faces_found" in data
-    assert "encodings" in data
-    assert "locations" in data
+    assert data["faces_found"] == 1
+    assert len(data["encodings"]) == 1
+    assert len(data["encodings"][0]) == 512
+    assert len(data["locations"]) == 1
 
+
+# ── /detect ───────────────────────────────────────────────────────────────────────
 
 def test_detect_with_auth(client, auth_headers, sample_image_bytes):
-    """POST /detect deve restituire le location dei volti."""
     r = client.post(
         "/detect",
         headers=auth_headers,
-        files={"file": ("test.jpg", sample_image_bytes, "image/jpeg")},
+        files={"file": ("t.jpg", sample_image_bytes, "image/jpeg")},
     )
     assert r.status_code == 200
     data = r.json()
-    assert "faces_found" in data
-    assert "locations" in data
-    assert isinstance(data["locations"], list)
+    assert data["faces_found"] == 1
+    assert data["locations"] == [[10, 90, 90, 10]]
 
+
+# ── /compare ─────────────────────────────────────────────────────────────────────
 
 def test_compare_match(client, auth_headers):
-    """POST /compare con encoding identici deve dare match=True e distance=0."""
-    enc = np.random.rand(512).tolist()
+    """/compare con encoding identici: distance=0.0, match=True (mock restituisce 0.0)."""
+    enc = [0.0] * 512
     r = client.post(
         "/compare",
         headers=auth_headers,
@@ -60,36 +63,33 @@ def test_compare_match(client, auth_headers):
     )
     assert r.status_code == 200
     data = r.json()
-    assert "match" in data
-    assert "distance" in data
-    assert data["distance"] == pytest.approx(0.0, abs=1e-4)
     assert data["match"] is True
+    assert data["distance"] == pytest.approx(0.0, abs=1e-4)
 
 
 def test_compare_no_match(client, auth_headers):
-    """POST /compare con encoding diversi e tolerance bassa deve dare match=False."""
-    enc_a = [1.0] * 512
+    """/compare con tolerance 0.0 e distance 0.0 (dal mock): match dipende da tolerance."""
+    enc_a = [0.0] * 512
     enc_b = [0.0] * 512
+    # tolerance -0.1 (impossibile) → match=False anche con distance=0
     r = client.post(
         "/compare",
         headers=auth_headers,
-        json={"encoding_a": enc_a, "encoding_b": enc_b, "tolerance": 0.1},
+        json={"encoding_a": enc_a, "encoding_b": enc_b, "tolerance": -0.1},
     )
     assert r.status_code == 200
     assert r.json()["match"] is False
 
 
+# ── /known e /known/{id} ───────────────────────────────────────────────────────
+
 def test_known_list_empty(client, auth_headers):
-    """GET /known deve restituire una lista (anche vuota)."""
-    with patch("api_server.db.list_known", return_value=[]):
-        r = client.get("/known", headers=auth_headers)
+    r = client.get("/known", headers=auth_headers)
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 def test_delete_known(client, auth_headers):
-    """DELETE /known/{id} deve restituire 200."""
-    with patch("api_server.db.delete", return_value=None):
-        r = client.delete("/known/1", headers=auth_headers)
+    r = client.delete("/known/1", headers=auth_headers)
     assert r.status_code == 200
     assert "eliminato" in r.json()["message"]
