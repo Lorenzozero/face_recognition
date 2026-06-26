@@ -1,7 +1,20 @@
-# -*- coding: utf-8 -*-
+"""
+face_recognition-ng
+Fork of ageitgey/face_recognition — InsightFace backend, same API.
 
-__author__ = """Adam Geitgey"""
-__email__ = 'ageitgey@gmail.com'
-__version__ = '1.4.0'
+Original project: https://github.com/ageitgey/face_recognition
+Fork by: https://github.com/Lorenzozero
+"""
 
-from .api import load_image_file, face_locations, batch_face_locations, face_landmarks, face_encodings, compare_faces, face_distance
+from .backends.insightface_backend import (
+    load_image_file,
+    face_locations,
+    face_encodings,
+    compare_faces,
+    face_distance,
+    face_landmarks,
+)
+
+__version__ = "2.0.0"
+__author__ = "Lorenzozero (fork)"
+__original_author__ = "Adam Geitgey"

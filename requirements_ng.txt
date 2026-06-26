@@ -1,0 +1,19 @@
+# face_recognition-ng requirements
+# Replaces dlib with InsightFace for Python 3.9+ compatibility and GPU support
+
+# Core
+insightface>=0.7.3
+onnxruntime>=1.16.0          # CPU inference (replace with onnxruntime-gpu for CUDA)
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# REST API
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+pydantic>=2.0.0
+
+# Optional: for PDF report generation (Phase 5)
+# reportlab>=4.0.0
+# jinja2>=3.1.0
