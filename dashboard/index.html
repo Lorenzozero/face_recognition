@@ -17,6 +17,7 @@
       --accent2: #7c3aed;
       --danger: #f87171;
       --success: #4ade80;
+      --pdf: #ff6b35;
       --font: 'Inter', system-ui, sans-serif;
     }
     body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
@@ -48,16 +49,30 @@
     button.primary { background: var(--accent); color: #0f1117; border-color: var(--accent); font-weight: 600; }
     button.primary:hover { opacity: 0.85; }
     button.danger { background: #450a0a; border-color: var(--danger); color: var(--danger); }
-    input[type=text] {
+    button.pdf-btn {
+      background: var(--pdf); color: #0f1117; border-color: var(--pdf);
+      font-weight: 700; width: 100%; margin-top: 0.5rem; font-size: 0.9rem;
+      padding: 0.6rem;
+    }
+    button.pdf-btn:hover { opacity: 0.85; color: #0f1117; border-color: var(--pdf); }
+    button.pdf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type=text], input[type=file] {
       padding: 0.5rem 0.75rem; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 0.5rem; color: var(--text); font-size: 0.85rem; outline: none; flex: 1;
     }
     input[type=text]:focus { border-color: var(--accent); }
+    input[type=file] { padding: 0.4rem 0.5rem; cursor: pointer; }
+    input[type=file]::-webkit-file-upload-button {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      border-radius: 0.35rem; padding: 0.25rem 0.6rem; cursor: pointer; font-size: 0.8rem;
+    }
     .sidebar { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
     .card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem;
     }
+    .card.pdf-card { border-color: var(--pdf); background: #1a1207; }
     .card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.75rem; }
+    .card.pdf-card h3 { color: var(--pdf); }
     .stat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.9rem; }
     .stat-val { font-weight: 700; color: var(--accent); font-size: 1.4rem; }
     #faceList { display: flex; flex-direction: column; gap: 0.5rem; max-height: 200px; overflow-y: auto; }
@@ -72,6 +87,7 @@
     .log-entry { padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
     .log-entry.match { color: var(--success); }
     .log-entry.error { color: var(--danger); }
+    .log-entry.pdf  { color: var(--pdf); }
     .rtsp-row { display: flex; gap: 0.5rem; }
     .token-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
     #knownList { display: flex; flex-direction: column; gap: 0.4rem; max-height: 180px; overflow-y: auto; }
@@ -80,16 +96,25 @@
       padding: 0.35rem 0.6rem; background: var(--surface2); border-radius: 0.4rem; font-size: 0.8rem;
     }
     .del-btn { color: var(--danger); cursor: pointer; font-size: 0.75rem; padding: 0.1rem 0.4rem; border: 1px solid var(--danger); border-radius: 0.3rem; background: none; }
-    .mode-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
-    .mode-tab { flex: 1; padding: 0.4rem; text-align: center; border-radius: 0.4rem; border: 1px solid var(--border); cursor: pointer; font-size: 0.8rem; }
-    .mode-tab.active { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+    .pdf-field { display: flex; flex-direction: column; gap: 0.5rem; }
+    .pdf-field label { font-size: 0.75rem; color: var(--muted); }
+    .pdf-status {
+      font-size: 0.78rem; text-align: center; padding: 0.4rem;
+      border-radius: 0.4rem; margin-top: 0.4rem; display: none;
+    }
+    .pdf-status.loading { background: #1a1a2e; border: 1px solid var(--accent2); color: var(--accent2); display: block; }
+    .pdf-status.success { background: #0d2b1a; border: 1px solid var(--success); color: var(--success); display: block; }
+    .pdf-status.error   { background: #2b0d0d; border: 1px solid var(--danger); color: var(--danger); display: block; }
+    .maigret-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
+    .maigret-row label { font-size: 0.8rem; color: var(--muted); cursor: pointer; }
+    input[type=checkbox] { accent-color: var(--pdf); width: 14px; height: 14px; cursor: pointer; }
   </style>
 </head>
 <body>
 <header>
-  <h1>⚡ face_recognition-ng</h1>
+  <h1>&#9889; face_recognition-ng</h1>
   <div style="display:flex;gap:0.75rem;align-items:center">
-    <span id="statusBadge" class="badge offline">● Offline</span>
+    <span id="statusBadge" class="badge offline">&#9679; Offline</span>
     <span class="badge" id="fpsBadge">0 FPS</span>
   </div>
 </header>
@@ -102,13 +127,13 @@
       <canvas id="overlayCanvas"></canvas>
     </div>
     <div class="controls">
-      <button class="primary" id="startBtn" onclick="startWebcam()">▶ Avvia Webcam</button>
-      <button id="stopBtn" onclick="stopStream()" disabled>⏹ Stop</button>
-      <button onclick="captureAndRegister()">📸 Registra Volto</button>
+      <button class="primary" id="startBtn" onclick="startWebcam()">&#9654; Avvia Webcam</button>
+      <button id="stopBtn" onclick="stopStream()" disabled>&#9209; Stop</button>
+      <button onclick="captureAndRegister()">&#128248; Registra Volto</button>
     </div>
     <div class="rtsp-row">
       <input type="text" id="rtspUrl" placeholder="rtsp://192.168.1.100:554/stream" />
-      <button onclick="startRTSP()">🎥 Connetti RTSP</button>
+      <button onclick="startRTSP()">&#127909; Connetti RTSP</button>
     </div>
   </div>
 
@@ -131,11 +156,30 @@
       <div id="faceList"></div>
     </div>
 
+    <!-- PDF Report -->
+    <div class="card pdf-card">
+      <h3>&#128196; Genera Report PDF OSINT</h3>
+      <div class="pdf-field">
+        <label>Nome target</label>
+        <input type="text" id="pdfName" placeholder="Es. Mario Rossi" />
+        <label style="margin-top:0.25rem">Immagine volto</label>
+        <input type="file" id="pdfFile" accept="image/*" />
+        <div class="maigret-row">
+          <input type="checkbox" id="pdfMaigret" />
+          <label for="pdfMaigret">Includi Maigret (lento ~60s)</label>
+        </div>
+      </div>
+      <button class="pdf-btn" id="pdfBtn" onclick="generatePdfReport()">
+        &#11015; Scarica Report PDF
+      </button>
+      <div class="pdf-status" id="pdfStatus"></div>
+    </div>
+
     <!-- Volti noti -->
     <div class="card">
       <h3>Volti Noti nel DB</h3>
       <div id="knownList"><span style="color:var(--muted);font-size:0.8rem">Nessun volto registrato</span></div>
-      <button style="margin-top:0.75rem;width:100%" onclick="loadKnown()">🔄 Aggiorna lista</button>
+      <button style="margin-top:0.75rem;width:100%" onclick="loadKnown()">&#128260; Aggiorna lista</button>
     </div>
 
     <!-- Log -->
@@ -149,11 +193,10 @@
 <script>
   let ws = null;
   let stream = null;
-  let animFrame = null;
   let lastFrameTime = Date.now();
   let frameCount = 0;
   let totalMatches = 0;
-  let streamMode = 'webcam'; // 'webcam' | 'rtsp'
+  let streamMode = 'webcam';
 
   const video = document.getElementById('videoEl');
   const canvas = document.getElementById('overlayCanvas');
@@ -172,8 +215,64 @@
 
   function setStatus(live) {
     const b = document.getElementById('statusBadge');
-    b.textContent = live ? '● Live' : '● Offline';
+    b.textContent = live ? '\u25CF Live' : '\u25CF Offline';
     b.className = 'badge ' + (live ? 'live' : 'offline');
+  }
+
+  function setPdfStatus(msg, type) {
+    const el = document.getElementById('pdfStatus');
+    el.textContent = msg;
+    el.className = 'pdf-status ' + type;
+  }
+
+  async function generatePdfReport() {
+    const name = document.getElementById('pdfName').value.trim();
+    const fileInput = document.getElementById('pdfFile');
+    const runMaigret = document.getElementById('pdfMaigret').checked;
+
+    if (!name) { setPdfStatus('Inserisci il nome del target.', 'error'); return; }
+    if (!fileInput.files.length) { setPdfStatus('Seleziona un\'immagine del volto.', 'error'); return; }
+
+    const btn = document.getElementById('pdfBtn');
+    btn.disabled = true;
+    setPdfStatus('Generazione in corso... attendere.', 'loading');
+    log('Avvio generazione PDF per: ' + name, 'pdf');
+
+    try {
+      const form = new FormData();
+      form.append('name', name);
+      form.append('file', fileInput.files[0]);
+      form.append('run_maigret', runMaigret ? 'true' : 'false');
+
+      const res = await fetch('/report/pdf', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token() },
+        body: form,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.status }));
+        throw new Error(err.detail || res.status);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `osint_report_${name.replace(/\s+/g, '_').toLowerCase()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setPdfStatus('PDF scaricato con successo!', 'success');
+      log('PDF generato e scaricato: ' + a.download, 'pdf');
+    } catch (e) {
+      setPdfStatus('Errore: ' + e.message, 'error');
+      log('Errore PDF: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function startWebcam() {
@@ -183,7 +282,6 @@
     video.style.display = 'block';
     document.getElementById('startBtn').disabled = true;
     document.getElementById('stopBtn').disabled = false;
-
     const wsUrl = `ws://localhost:8000/ws/stream`;
     ws = new WebSocket(wsUrl);
     ws.onopen = () => { setStatus(true); log('WebSocket webcam connesso', 'match'); sendFrameLoop(); };
@@ -198,14 +296,12 @@
     streamMode = 'rtsp';
     video.srcObject = null;
     video.style.display = 'none';
-
     const wsUrl = `ws://localhost:8000/ws/rtsp?url=${encodeURIComponent(url)}`;
     ws = new WebSocket(wsUrl);
     ws.onopen = () => { setStatus(true); log('Connesso a stream RTSP: ' + url, 'match'); document.getElementById('stopBtn').disabled = false; };
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.error) { log(data.error, 'error'); return; }
-      // Mostra frame dal server
       const img = new Image();
       img.onload = () => {
         canvas.width = canvas.offsetWidth;
@@ -228,7 +324,6 @@
     c.drawImage(video, 0, 0, 640, 360);
     const frame = offscreen.toDataURL('image/jpeg', 0.7);
     ws.send(JSON.stringify({ frame }));
-    // Aggiorna overlay
     canvas.width = video.offsetWidth;
     canvas.height = video.offsetHeight;
     frameCount++;
@@ -237,7 +332,7 @@
       document.getElementById('fpsBadge').textContent = frameCount + ' FPS';
       frameCount = 0; lastFrameTime = now;
     }
-    setTimeout(sendFrameLoop, 80); // ~12 FPS
+    setTimeout(sendFrameLoop, 80);
   }
 
   function handleMessage(event) {
@@ -324,7 +419,7 @@
     list.innerHTML = data.map(f =>
       `<div class="known-item">
         <span>${f.name}</span>
-        <button class="del-btn" onclick="deleteKnown(${f.id})">✕</button>
+        <button class="del-btn" onclick="deleteKnown(${f.id})">&#10005;</button>
       </div>`
     ).join('');
   }
@@ -338,9 +433,8 @@
     else log('Errore eliminazione', 'error');
   }
 
-  // Init
   loadKnown();
-  log('Dashboard caricata. Avvia la webcam o connetti uno stream RTSP.');
+  log('Dashboard caricata. Avvia la webcam o genera un Report PDF OSINT.');
 </script>
 </body>
 </html>
