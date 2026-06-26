@@ -18,6 +18,9 @@ websockets>=12.0
 # Database volti noti
 # sqlite3 è incluso nella stdlib Python — nessuna dipendenza aggiuntiva
 
-# Opzionale: report PDF (Fase 5)
-# reportlab>=4.0.0
-# jinja2>=3.1.0
+# Report PDF (Fase 5) — endpoint POST /report/pdf
+reportlab>=4.1.0
+matplotlib>=3.8.0
+
+# Opzionale — OSINT username discovery
+# pip install maigret
