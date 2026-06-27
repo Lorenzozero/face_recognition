@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.4.0
+face_recognition-ng — FastAPI REST + WebSocket Server v4.5.0
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -13,7 +13,7 @@ Endpoint HTTP:
   POST /osint/social       — ricerca social per nome/username (rate: 10/60s)
   POST /osint/full         — pipeline OSINT completa (rate: 2/60s)
   POST /report/pdf         — genera PDF OSINT completo (rate: 2/60s)
-  GET  /osint/stats        — statistiche aggregate + ultime run OSINT (rate: 20/60s)
+  GET  /osint/stats        — statistiche aggregate + ultime run (rate: 20/60s)
   GET  /osint/graph/{id}   — export grafo nodi/archi per una run (rate: 20/60s)
   GET  /health             — health check (no rate limit)
 
@@ -22,10 +22,11 @@ Variabili ENV:
   OSINT_CACHE_TTL_HOURS    ore validita' cache OSINT (default: 24)
   RATE_LIMIT_ENABLED       true/false (default: true)
   RATE_LIMIT_WINDOW_SECS   finestra rate limit in secondi (default: 60)
-  RATE_LIMIT_OSINT_IMAGE   max richieste /osint/image per finestra (default: 3)
-  RATE_LIMIT_OSINT_FULL    max richieste /osint/full e /report/pdf (default: 2)
-  RATE_LIMIT_OSINT_SOCIAL  max richieste /osint/social (default: 10)
-  RATE_LIMIT_OSINT_STATS   max richieste /osint/stats e /osint/graph (default: 20)
+  RATE_LIMIT_OSINT_IMAGE   max req /osint/image per finestra (default: 3)
+  RATE_LIMIT_OSINT_FULL    max req /osint/full e /report/pdf (default: 2)
+  RATE_LIMIT_OSINT_SOCIAL  max req /osint/social (default: 10)
+  RATE_LIMIT_OSINT_STATS   max req /osint/stats e /osint/graph (default: 20)
+  RATE_LIMIT_CLEANUP_SECS  intervallo cleanup rate limiter in secondi (default: 300)
 
 Usage:
   FR_API_TOKEN=secret python api_server.py
@@ -35,6 +36,7 @@ Usage:
 import os
 import io
 import json
+import asyncio
 import numpy as np
 from typing import List, Optional
 
@@ -57,6 +59,8 @@ from report_generator import build_pdf
 from osint_db import OsintDatabase
 from rate_limiter import RateLimiter, LIMIT_OSINT_IMAGE, LIMIT_OSINT_FULL, LIMIT_OSINT_SOCIAL, LIMIT_OSINT_STATS
 
+RATE_LIMIT_CLEANUP_SECS = int(os.environ.get("RATE_LIMIT_CLEANUP_SECS", "300"))
+
 # — Auth —
 API_TOKEN = os.environ.get("FR_API_TOKEN", "changeme")
 security = HTTPBearer(auto_error=False)
@@ -70,7 +74,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.4.0",
+    version="4.5.0",
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -84,6 +88,18 @@ social = SocialLookup()
 maigret = MaigretWrapper()
 osint_db = OsintDatabase()
 limiter = RateLimiter()
+
+
+# — Background task: cleanup rate limiter —
+@app.on_event("startup")
+async def start_rate_limiter_cleanup():
+    """Avvia un task asincrono che pulisce le finestre scadute ogni RATE_LIMIT_CLEANUP_SECS."""
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(RATE_LIMIT_CLEANUP_SECS)
+            limiter.cleanup_expired()
+    asyncio.create_task(_cleanup_loop())
+
 
 # — Modelli —
 class CompareRequest(BaseModel):
@@ -216,12 +232,12 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.4.0"}
+    return {"status": "ok", "version": "4.5.0"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.4"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.5"}
 
 
 # — Endpoint core riconoscimento —
