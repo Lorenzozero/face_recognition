@@ -8,6 +8,7 @@ Usage:
     run_id = db.save_run(image_hash, target_name, run_type, raw_json)
     db.save_evidence_batch(run_id, evidence_list)
     db.get_aggregate_stats()
+    db.get_graph(run_id)  # export nodi/archi per Neo4j / Maltego
 """
 
 import sqlite3
@@ -54,12 +55,19 @@ class OsintDatabase:
                 )
                 """
             )
+            # ── Indici per performance ────────────────────────────────────
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_image_hash ON osint_runs(image_hash)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_run_type ON osint_runs(run_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_created_at ON osint_runs(created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_risk_score ON osint_runs(risk_score DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_run_id ON osint_evidence(run_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_source ON osint_evidence(source)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_kind ON osint_evidence(kind)")
             conn.commit()
 
     # ── Cache TTL ────────────────────────────────────────────────────────────
 
     def _is_fresh(self, created_at: str) -> bool:
-        """Controlla se una run e' ancora valida rispetto a OSINT_CACHE_TTL_HOURS."""
         try:
             ts = datetime.fromisoformat(created_at.replace(" ", "T"))
             return datetime.utcnow() - ts < timedelta(hours=OSINT_CACHE_TTL_HOURS)
@@ -69,7 +77,6 @@ class OsintDatabase:
     # ── Salvataggio ─────────────────────────────────────────────────────────
 
     def save_run(self, image_hash: str, target_name: str, run_type: str, raw_json: Dict, risk_score: float = 0.0) -> int:
-        """Salva una run OSINT generica e restituisce l'ID."""
         with sqlite3.connect(self.db_path) as conn:
             cur = conn.execute(
                 "INSERT INTO osint_runs (image_hash, target_name, run_type, risk_score, raw_json) VALUES (?, ?, ?, ?, ?)",
@@ -79,7 +86,6 @@ class OsintDatabase:
             return cur.lastrowid
 
     def save_evidence_batch(self, run_id: int, evidence: List[Dict]) -> None:
-        """Salva una lista di evidenze (fonte, url, tipo, confidence, meta)."""
         with sqlite3.connect(self.db_path) as conn:
             conn.executemany(
                 "INSERT INTO osint_evidence (run_id, source, url, kind, confidence, meta_json) VALUES (?, ?, ?, ?, ?, ?)",
@@ -100,7 +106,6 @@ class OsintDatabase:
     # ── Lettura / cache ──────────────────────────────────────────────────────
 
     def get_runs_by_image_hash(self, image_hash: str, run_type: Optional[str] = None) -> List[Dict]:
-        """Restituisce run OSINT per un image_hash, opzionalmente filtrate per tipo."""
         query = "SELECT id, target_name, run_type, risk_score, created_at FROM osint_runs WHERE image_hash = ?"
         params = [image_hash]
         if run_type:
@@ -115,7 +120,6 @@ class OsintDatabase:
         ]
 
     def get_fresh_run(self, image_hash: str, run_type: str) -> Optional[Dict]:
-        """Restituisce il raw_json di una run recente (entro TTL) per image_hash+tipo."""
         runs = self.get_runs_by_image_hash(image_hash, run_type=run_type)
         for r in runs:
             if self._is_fresh(r["created_at"]):
@@ -123,7 +127,6 @@ class OsintDatabase:
         return None
 
     def load_raw_run(self, run_id: int) -> Optional[Dict]:
-        """Carica il raw_json di una run."""
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(
                 "SELECT raw_json FROM osint_runs WHERE id = ?", (run_id,)
@@ -131,7 +134,6 @@ class OsintDatabase:
         return json.loads(row[0]) if row else None
 
     def get_evidence_for_run(self, run_id: int) -> List[Dict]:
-        """Restituisce evidenze strutturate per una run."""
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT source, url, kind, confidence, meta_json FROM osint_evidence WHERE run_id = ? ORDER BY confidence DESC",
@@ -143,7 +145,6 @@ class OsintDatabase:
         ]
 
     def get_recent_runs(self, limit: int = 20) -> List[Dict]:
-        """Restituisce le run OSINT piu' recenti."""
         with sqlite3.connect(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT id, image_hash, target_name, run_type, risk_score, created_at FROM osint_runs ORDER BY created_at DESC LIMIT ?",
@@ -154,10 +155,82 @@ class OsintDatabase:
             for r in rows
         ]
 
+    # ── Grafo nodi/archi (export per Neo4j / Maltego / vis.js) ──────────────
+
+    def get_graph(self, run_id: int) -> Dict:
+        """
+        Restituisce nodi e archi per una run OSINT.
+        Struttura:
+          nodes: [{id, label, type, ...}]
+          edges: [{source, target, label}]
+        Tipi nodi: person, account, site, evidence
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            run = conn.execute(
+                "SELECT id, target_name, run_type, risk_score, created_at FROM osint_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+            if not run:
+                return {"nodes": [], "edges": []}
+
+            evidence_rows = conn.execute(
+                "SELECT id, source, url, kind, confidence, meta_json FROM osint_evidence WHERE run_id = ?",
+                (run_id,),
+            ).fetchall()
+
+        person_node = {
+            "id": f"person:{run[1]}",
+            "label": run[1] or f"Target #{run[0]}",
+            "type": "person",
+            "risk_score": run[3],
+        }
+        nodes = [person_node]
+        edges = []
+        seen_sites = set()
+        seen_accounts = set()
+
+        for ev in evidence_rows:
+            ev_id, source, url, kind, confidence, meta_raw = ev
+            meta = json.loads(meta_raw or "{}")
+
+            # Nodo sito/fonte
+            site_id = f"site:{source}"
+            if site_id not in seen_sites:
+                nodes.append({"id": site_id, "label": source, "type": "site"})
+                seen_sites.add(site_id)
+            edges.append({"source": person_node["id"], "target": site_id, "label": kind or "found_on"})
+
+            # Nodo account (per social e maigret)
+            if kind in ("social_profile", "maigret_profile") and url:
+                acc_id = f"account:{url}"
+                if acc_id not in seen_accounts:
+                    label = meta.get("username") or url
+                    nodes.append({"id": acc_id, "label": label, "type": "account",
+                                  "url": url, "platform": meta.get("platform") or meta.get("site"),
+                                  "confidence": confidence})
+                    seen_accounts.add(acc_id)
+                edges.append({"source": site_id, "target": acc_id, "label": "profile"})
+
+            # Nodo evidenza raw (reverse image)
+            elif kind == "reverse_image" and url:
+                ev_node_id = f"evidence:{ev_id}"
+                nodes.append({"id": ev_node_id, "label": meta.get("title") or url[:60],
+                               "type": "evidence", "url": url, "confidence": confidence})
+                edges.append({"source": site_id, "target": ev_node_id, "label": "image_result"})
+
+        return {
+            "run_id": run_id,
+            "target_name": run[1],
+            "risk_score": run[3],
+            "nodes": nodes,
+            "edges": edges,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        }
+
     # ── Statistiche aggregate ────────────────────────────────────────────────
 
     def get_aggregate_stats(self) -> Dict:
-        """Stats aggregate: totale run, media risk_score, conteggi per tipo, errori per fonte, top evidenze."""
         with sqlite3.connect(self.db_path) as conn:
             total = conn.execute("SELECT COUNT(*) FROM osint_runs").fetchone()[0]
             avg_risk = conn.execute("SELECT AVG(risk_score) FROM osint_runs").fetchone()[0] or 0.0

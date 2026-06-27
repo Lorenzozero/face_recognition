@@ -1,28 +1,31 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.3.0
+face_recognition-ng — FastAPI REST + WebSocket Server v4.4.0
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
-  POST /encode          — encoding da immagine
-  POST /detect          — rilevamento volti
-  POST /compare         — confronto encoding
-  POST /register        — registra volto noto nel DB
-  GET  /known           — lista volti noti
-  DELETE /known/{id}    — elimina volto noto
-  POST /osint/image     — reverse image search (cache TTL 24h)
-  POST /osint/social    — ricerca social per nome/username (evidenze in DB)
-  POST /osint/full      — pipeline OSINT completa (cache TTL + risk_score)
-  POST /report/pdf      — genera PDF OSINT completo (con risk_score)
-  GET  /osint/stats     — statistiche aggregate + ultime run OSINT
-  GET  /health          — health check
+  POST /encode             — encoding da immagine
+  POST /detect             — rilevamento volti
+  POST /compare            — confronto encoding
+  POST /register           — registra volto noto nel DB
+  GET  /known              — lista volti noti
+  DELETE /known/{id}       — elimina volto noto
+  POST /osint/image        — reverse image search (rate: 3/60s, cache TTL 24h)
+  POST /osint/social       — ricerca social per nome/username (rate: 10/60s)
+  POST /osint/full         — pipeline OSINT completa (rate: 2/60s)
+  POST /report/pdf         — genera PDF OSINT completo (rate: 2/60s)
+  GET  /osint/stats        — statistiche aggregate + ultime run OSINT (rate: 20/60s)
+  GET  /osint/graph/{id}   — export grafo nodi/archi per una run (rate: 20/60s)
+  GET  /health             — health check (no rate limit)
 
 Variabili ENV:
-  FR_API_TOKEN          — token autenticazione (default: changeme)
-  OSINT_CACHE_TTL_HOURS — ore di validita' cache OSINT (default: 24)
-  OSINT_ENABLE_EXTERNAL — abilita chiamate esterne OSINT (default: true)
-  OSINT_ENABLE_MAIGRET  — abilita Maigret (default: true)
-  OSINT_TIMEOUT         — timeout httpx in secondi (default: 30)
-  OSINT_MAX_SITES       — max siti Maigret (default: 500)
+  FR_API_TOKEN             token autenticazione (default: changeme)
+  OSINT_CACHE_TTL_HOURS    ore validita' cache OSINT (default: 24)
+  RATE_LIMIT_ENABLED       true/false (default: true)
+  RATE_LIMIT_WINDOW_SECS   finestra rate limit in secondi (default: 60)
+  RATE_LIMIT_OSINT_IMAGE   max richieste /osint/image per finestra (default: 3)
+  RATE_LIMIT_OSINT_FULL    max richieste /osint/full e /report/pdf (default: 2)
+  RATE_LIMIT_OSINT_SOCIAL  max richieste /osint/social (default: 10)
+  RATE_LIMIT_OSINT_STATS   max richieste /osint/stats e /osint/graph (default: 20)
 
 Usage:
   FR_API_TOKEN=secret python api_server.py
@@ -35,7 +38,7 @@ import json
 import numpy as np
 from typing import List, Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status, WebSocket, Query, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status, WebSocket, Query, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +55,7 @@ from social_lookup import SocialLookup
 from maigret_wrapper import MaigretWrapper
 from report_generator import build_pdf
 from osint_db import OsintDatabase
+from rate_limiter import RateLimiter, LIMIT_OSINT_IMAGE, LIMIT_OSINT_FULL, LIMIT_OSINT_SOCIAL, LIMIT_OSINT_STATS
 
 # — Auth —
 API_TOKEN = os.environ.get("FR_API_TOKEN", "changeme")
@@ -66,7 +70,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.3.0",
+    version="4.4.0",
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -79,6 +83,7 @@ osint = OsintEngine()
 social = SocialLookup()
 maigret = MaigretWrapper()
 osint_db = OsintDatabase()
+limiter = RateLimiter()
 
 # — Modelli —
 class CompareRequest(BaseModel):
@@ -122,18 +127,12 @@ def load_image_from_upload(file: UploadFile) -> np.ndarray:
     return np.array(image)
 
 
-def image_to_bytes(file: UploadFile) -> bytes:
-    file.file.seek(0)
-    return file.file.read()
-
-
 def _get_image_hash(contents: bytes) -> str:
     import hashlib
     return hashlib.md5(contents).hexdigest()[:12]
 
 
 def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
-    """Costruisce la lista di evidenze dalle fonti reverse image."""
     evidence = []
     sources = reverse.get("sources", {})
     for src_name, src_data in sources.items():
@@ -149,7 +148,6 @@ def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
 
 
 def _build_evidence_from_social(social_data: dict) -> List[dict]:
-    """Costruisce la lista di evidenze dai profili social trovati."""
     evidence = []
     platforms = []
     if isinstance(social_data, dict):
@@ -169,7 +167,6 @@ def _build_evidence_from_social(social_data: dict) -> List[dict]:
 
 
 def _build_evidence_from_maigret(maigret_data: dict) -> List[dict]:
-    """Costruisce la lista di evidenze dai risultati Maigret."""
     evidence = []
     if not maigret_data or not isinstance(maigret_data, dict):
         return evidence
@@ -194,16 +191,16 @@ def _build_evidence_from_maigret(maigret_data: dict) -> List[dict]:
 
 
 def _compute_risk_score(osint_data: dict) -> float:
-    """Risk score pesato: social found (40%), Maigret hits (40%), reverse image results (20%)."""
-    social = osint_data.get("social") or {}
-    platforms = social.get("platforms") or []
+    """Risk score pesato: social (40%) + Maigret (40%) + reverse image (20%)."""
+    social_d = osint_data.get("social") or {}
+    platforms = social_d.get("platforms") or []
     found_social = sum(1 for p in platforms if p.get("found"))
     social_score = min(1.0, found_social / 10.0) * 0.4
 
-    maigret = osint_data.get("maigret") or {}
+    maigret_d = osint_data.get("maigret") or {}
     maigret_hits = 0
-    if isinstance(maigret, dict):
-        for username, data in maigret.items():
+    if isinstance(maigret_d, dict):
+        for username, data in maigret_d.items():
             results = data.get("results", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             maigret_hits += len(results)
     maigret_score = min(1.0, maigret_hits / 20.0) * 0.4
@@ -219,12 +216,12 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.3.0"}
+    return {"status": "ok", "version": "4.4.0"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.3"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.4"}
 
 
 # — Endpoint core riconoscimento —
@@ -285,23 +282,24 @@ def delete_known_face(face_id: int, token: str = Depends(verify_token)):
 
 @app.post("/osint/image")
 async def osint_image_search(
+    request: Request,
     file: UploadFile = File(...),
     token: str = Depends(verify_token),
 ):
-    """Reverse image search con cache TTL (OSINT_CACHE_TTL_HOURS, default 24h)."""
+    """Reverse image search con cache TTL e rate limit (3 req/60s per IP)."""
+    limiter.check(request, tag="osint_image", limit=LIMIT_OSINT_IMAGE)
+
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
     image_hash = _get_image_hash(contents)
 
-    # Cache TTL: usa run fresca se esiste
     cached = osint_db.get_fresh_run(image_hash, run_type="image")
     if cached:
         cached["faces_detected"] = len(locations)
         cached["from_cache"] = True
         return cached
 
-    # Ritaglia volto se trovato
     face_bytes = contents
     if locations:
         top, right, bottom, left = locations[0]
@@ -329,10 +327,13 @@ async def osint_image_search(
 
 @app.post("/osint/social")
 async def osint_social_search(
+    request: Request,
     body: OsintSearchRequest,
     token: str = Depends(verify_token),
 ):
-    """Cerca profili social dato un nome e/o username. Salva i profili trovati in DB OSINT."""
+    """Cerca profili social con rate limit (10 req/60s per IP)."""
+    limiter.check(request, tag="osint_social", limit=LIMIT_OSINT_SOCIAL)
+
     result = {}
     image_hash = f"social:{body.name or ''}:{body.username or ''}"
 
@@ -351,7 +352,6 @@ async def osint_social_search(
         if body.run_maigret and variants:
             result["maigret"] = await maigret.search_multiple(variants[:5])
 
-    # Salva evidenze social e Maigret nel DB
     social_data = result.get("by_name") or result.get("by_username") or {}
     maigret_data = result.get("maigret") or {}
     evidence = _build_evidence_from_social(social_data) + _build_evidence_from_maigret(maigret_data)
@@ -364,18 +364,20 @@ async def osint_social_search(
 
 @app.post("/osint/full")
 async def osint_full(
+    request: Request,
     name: str = Form(...),
     file: UploadFile = File(...),
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa con cache TTL, risk_score pesato, evidenze complete in DB."""
+    """Pipeline OSINT completa con cache TTL, risk_score pesato, rate limit (2 req/60s)."""
+    limiter.check(request, tag="osint_full", limit=LIMIT_OSINT_FULL)
+
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
     image_hash = _get_image_hash(contents)
 
-    # Cache TTL
     cached = osint_db.get_fresh_run(image_hash, run_type="full")
     if cached:
         cached["faces_detected"] = len(locations)
@@ -417,19 +419,22 @@ async def osint_full(
     return osint_data
 
 
-# — Endpoint Report PDF —
+# — Report PDF —
 @app.post(
     "/report/pdf",
     response_class=Response,
     responses={200: {"content": {"application/pdf": {}}, "description": "PDF OSINT report scaricabile"}},
 )
 async def generate_pdf_report(
+    request: Request,
     name: str = Form(...),
     file: UploadFile = File(...),
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa + PDF con risk_score + salvataggio completo in DB OSINT."""
+    """Pipeline OSINT completa + PDF con risk_score + rate limit (2 req/60s)."""
+    limiter.check(request, tag="report_pdf", limit=LIMIT_OSINT_FULL)
+
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -487,16 +492,28 @@ async def generate_pdf_report(
     )
 
 
-# — OSINT stats aggregate —
+# — OSINT stats + grafo —
 @app.get("/osint/stats")
-async def osint_stats(token: str = Depends(verify_token)):
-    """Stats aggregate: totale run, media risk_score, run per tipo, evidenze per fonte/tipo, top target."""
+async def osint_stats(request: Request, token: str = Depends(verify_token)):
+    """Stats aggregate: totale run, risk_score, run/tipo, evidenze per fonte, top target."""
+    limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
     agg = osint_db.get_aggregate_stats()
     recent = osint_db.get_recent_runs(limit=20)
-    return {
-        **agg,
-        "recent_runs": recent,
-    }
+    return {**agg, "recent_runs": recent}
+
+
+@app.get("/osint/graph/{run_id}")
+async def osint_graph(
+    run_id: int,
+    request: Request,
+    token: str = Depends(verify_token),
+):
+    """Export grafo nodi/archi per una run OSINT. Compatibile con Neo4j / vis.js."""
+    limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
+    graph = osint_db.get_graph(run_id)
+    if not graph["nodes"]:
+        raise HTTPException(status_code=404, detail=f"Run ID {run_id} non trovata")
+    return graph
 
 
 # — WebSocket —
