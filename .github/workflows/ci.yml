@@ -45,6 +45,8 @@ jobs:
         run: pytest tests/ -v --tb=short -k "not integration"
         env:
           FR_API_TOKEN: test-token-ci
+          # Disabilita rate limit nei test unit per evitare 429 flaky
+          RATE_LIMIT_ENABLED: "false"
           PYTHONPATH: _stubs
 
   # ------------------------------------------------------------------ #
@@ -93,3 +95,4 @@ jobs:
         run: pytest tests/test_integration_real.py -v --tb=short
         env:
           FR_API_TOKEN: test-token-ci
+          RATE_LIMIT_ENABLED: "false"

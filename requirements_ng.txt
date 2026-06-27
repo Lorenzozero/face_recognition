@@ -18,12 +18,13 @@ websockets>=12.0
 # HTTP client (OSINT engine)
 httpx>=0.27.0
 
-# Database volti noti
-# sqlite3 e incluso nella stdlib Python — nessuna dipendenza aggiuntiva
+# Database volti noti + OSINT
+# sqlite3 è incluso nella stdlib Python — nessuna dipendenza aggiuntiva
+# rate_limiter.py usa solo stdlib (threading, time) — nessuna dipendenza aggiuntiva
 
-# Report PDF (Fase 5)
+# Report PDF
 reportlab>=4.1.0
 matplotlib>=3.8.0
 
-# Opzionale — OSINT username discovery
+# Opzionale — OSINT username discovery su 3000+ siti
 # pip install maigret
