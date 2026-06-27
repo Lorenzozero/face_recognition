@@ -21,19 +21,30 @@ import tempfile
 from typing import List, Dict, Optional
 
 
+OSINT_ENABLE_MAIGRET = os.getenv("OSINT_ENABLE_MAIGRET", "true").lower() == "true"
+OSINT_MAX_SITES = int(os.getenv("OSINT_MAX_SITES", "500"))
+
+
 class MaigretWrapper:
     """
     Wrapper per Maigret (https://github.com/soxoj/maigret).
     Esegue la ricerca in un subprocess per non bloccare FastAPI.
+
+    Configurazione via ENV:
+    - OSINT_ENABLE_MAIGRET=false -> disabilita completamente Maigret
+    - OSINT_MAX_SITES=500        -> limita numero di siti scansionati
     """
 
-    def __init__(self, timeout: int = 60, top_sites: int = 500):
+    def __init__(self, timeout: int = 60, top_sites: Optional[int] = None):
         self.timeout = timeout
-        self.top_sites = top_sites  # Limita ai top N siti per velocità
+        # Se non specificato, usa OSINT_MAX_SITES da ENV
+        self.top_sites = top_sites if top_sites is not None else OSINT_MAX_SITES
         self._maigret_available = self._check_maigret()
 
     def _check_maigret(self) -> bool:
         """Verifica se Maigret è installato."""
+        if not OSINT_ENABLE_MAIGRET:
+            return False
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "maigret", "--version"],
@@ -48,6 +59,14 @@ class MaigretWrapper:
         Cerca un username su tutti i siti supportati da Maigret.
         Restituisce i profili trovati con URL.
         """
+        if not OSINT_ENABLE_MAIGRET:
+            return {
+                "username": username,
+                "available": False,
+                "message": "Maigret disabilitato via OSINT_ENABLE_MAIGRET=false",
+                "results": [],
+            }
+
         if not self._maigret_available:
             return {
                 "username": username,
@@ -90,7 +109,6 @@ class MaigretWrapper:
             except subprocess.TimeoutExpired:
                 pass  # Usa i risultati parziali
 
-            # Leggi risultati JSON
             if os.path.exists(output_file):
                 with open(output_file) as f:
                     raw = json.load(f)
@@ -110,7 +128,6 @@ class MaigretWrapper:
                     "country": site_data.get("country", ""),
                 })
 
-        # Raggruppa per categoria
         by_category = {}
         for r in found:
             cat = r.get("category", "Other") or "Other"
