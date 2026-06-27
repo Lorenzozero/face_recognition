@@ -15,12 +15,17 @@ import asyncio
 import base64
 import io
 import hashlib
+import os
 import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass, field
 
 import httpx
 from PIL import Image
+
+
+OSINT_ENABLE_EXTERNAL = os.getenv("OSINT_ENABLE_EXTERNAL", "true").lower() == "true"
+OSINT_TIMEOUT = int(os.getenv("OSINT_TIMEOUT", "30"))
 
 
 @dataclass
@@ -37,6 +42,10 @@ class OsintEngine:
     """
     Motore OSINT per reverse image search su più fonti.
     Usa solo endpoint pubblici — nessuna API key richiesta per le funzioni base.
+
+    Comportamento configurabile via ENV:
+    - OSINT_ENABLE_EXTERNAL=false -> niente chiamate esterne, solo link generati
+    - OSINT_TIMEOUT=30            -> timeout httpx per motori esterni
     """
 
     HEADERS = {
@@ -45,16 +54,30 @@ class OsintEngine:
         "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8",
     }
 
-    def __init__(self, timeout: int = 15):
-        self.timeout = timeout
+    def __init__(self, timeout: Optional[int] = None):
+        # Se non specificato, usa OSINT_TIMEOUT da ENV
+        self.timeout = timeout if timeout is not None else OSINT_TIMEOUT
 
     async def search(self, image_bytes: bytes) -> Dict:
         """
         Esegue la ricerca su tutte le fonti in parallelo.
         Restituisce un dict con risultati aggregati per fonte.
+
+        Se OSINT_ENABLE_EXTERNAL=false, salta Google Lens/Yandex/TinEye
+        e ritorna solo i link generati (_build_search_links).
         """
-        img_b64 = base64.b64encode(image_bytes).decode()
         img_hash = hashlib.md5(image_bytes).hexdigest()[:8]
+
+        if not OSINT_ENABLE_EXTERNAL:
+            # Solo link di ricerca (PimEyes, Bing, Google Images)
+            links = await self._build_search_links(image_bytes)
+            return {
+                "image_hash": img_hash,
+                "timestamp": int(time.time()),
+                "sources": {"search_links": links},
+                "total_results": len(links.get("results", [])),
+                "external_calls": False,
+            }
 
         tasks = [
             self._search_google_lens(image_bytes),
@@ -70,6 +93,7 @@ class OsintEngine:
             "timestamp": int(time.time()),
             "sources": {},
             "total_results": 0,
+            "external_calls": True,
         }
 
         source_names = ["google_lens", "yandex", "tineye", "search_links"]
@@ -89,7 +113,6 @@ class OsintEngine:
         """
         try:
             async with httpx.AsyncClient(headers=self.HEADERS, timeout=self.timeout, follow_redirects=True) as client:
-                # Upload immagine a Google Lens
                 files = {"encoded_image": ("face.jpg", image_bytes, "image/jpeg")}
                 resp = await client.post(
                     "https://lens.google.com/upload",
@@ -139,11 +162,10 @@ class OsintEngine:
                     files=files,
                 )
                 search_url = str(resp.url)
-                # Prova a estrarre numero di match dall'HTML
                 count_text = ""
                 try:
                     import re
-                    match = re.search(r'(\d+)\s+result', resp.text)
+                    match = re.search(r"(\d+)\s+result", resp.text)
                     if match:
                         count_text = f"{match.group(1)} risultati trovati"
                 except Exception:
@@ -162,7 +184,6 @@ class OsintEngine:
         """
         b64 = base64.b64encode(image_bytes).decode()
 
-        # PimEyes è il motore più potente per volti — richiede upload manuale
         pimeyes_url = "https://pimeyes.com/en"
 
         return {
