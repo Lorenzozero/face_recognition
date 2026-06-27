@@ -13,6 +13,7 @@ Endpoint HTTP:
   POST /osint/social    — ricerca social per nome/username
   POST /osint/full      — pipeline OSINT completa
   POST /report/pdf      — genera PDF OSINT completo
+  GET  /osint/stats     — statistiche e ultime run OSINT
   GET  /health          — health check
 
 Endpoint WebSocket:
@@ -26,6 +27,7 @@ Usage:
 
 import os
 import io
+import json
 import numpy as np
 from typing import List, Optional
 
@@ -45,6 +47,7 @@ from osint_engine import OsintEngine
 from social_lookup import SocialLookup
 from maigret_wrapper import MaigretWrapper
 from report_generator import build_pdf
+from osint_db import OsintDatabase
 
 # — Auth —
 API_TOKEN = os.environ.get("FR_API_TOKEN", "changeme")
@@ -59,7 +62,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.0.0",
+    version="4.1.0",
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -71,6 +74,7 @@ db = FaceDatabase()
 osint = OsintEngine()
 social = SocialLookup()
 maigret = MaigretWrapper()
+osint_db = OsintDatabase()
 
 # — Modelli —
 class CompareRequest(BaseModel):
@@ -116,18 +120,18 @@ def image_to_bytes(file: UploadFile) -> bytes:
     file.file.seek(0)
     return file.file.read()
 
-# — Endpoint HTTP —
+# — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.0.0"}
+    return {"status": "ok", "version": "4.1.0"}
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.0"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.1"}
 
+# — Endpoint core riconoscimento —
 @app.post("/encode", response_model=EncodeResponse)
 def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)):
-    """Carica un'immagine e ottieni encoding + bounding box dei volti trovati."""
     img = load_image_from_upload(file)
     locations = face_recognition.face_locations(img)
     encodings = face_recognition.face_encodings(img)
@@ -139,14 +143,12 @@ def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)
 
 @app.post("/detect", response_model=DetectResponse)
 def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token)):
-    """Rileva volti in un'immagine senza calcolare encoding."""
     img = load_image_from_upload(file)
     locations = face_recognition.face_locations(img)
     return DetectResponse(faces_found=len(locations), locations=[list(loc) for loc in locations])
 
 @app.post("/compare", response_model=CompareResponse)
 def compare_faces(body: CompareRequest, token: str = Depends(verify_token)):
-    """Confronta due encoding facciali."""
     enc_a = np.array(body.encoding_a)
     enc_b = np.array(body.encoding_b)
     distances = face_recognition.face_distance([enc_a], enc_b)
@@ -159,7 +161,6 @@ def register_face(
     file: UploadFile = File(...),
     token: str = Depends(verify_token),
 ):
-    """Registra un volto noto nel database SQLite."""
     img = load_image_from_upload(file)
     encodings = face_recognition.face_encodings(img)
     if not encodings:
@@ -169,26 +170,38 @@ def register_face(
 
 @app.get("/known", response_model=List[KnownFace])
 def list_known_faces(token: str = Depends(verify_token)):
-    """Lista tutti i volti noti registrati."""
     return db.list_known()
 
 @app.delete("/known/{face_id}")
 def delete_known_face(face_id: int, token: str = Depends(verify_token)):
-    """Elimina un volto noto dal database."""
     db.delete(face_id)
     return {"message": f"Volto ID {face_id} eliminato"}
 
 # — Endpoint OSINT —
+
+def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
+    evidence = []
+    sources = reverse.get("sources", {})
+    for src_name, src_data in sources.items():
+        for r in src_data.get("results", []):
+            evidence.append({
+                "source": src_name,
+                "url": r.get("url", ""),
+                "kind": "reverse_image",
+                "confidence": 0.5,
+                "meta": {
+                    "title": r.get("title"),
+                },
+            })
+    return evidence
+
 
 @app.post("/osint/image")
 async def osint_image_search(
     file: UploadFile = File(...),
     token: str = Depends(verify_token),
 ):
-    """
-    Ricerca reverse image del volto su Google Lens, Yandex, TinEye, PimEyes.
-    Carica un'immagine con un volto, ottieni link di ricerca su tutte le piattaforme.
-    """
+    """Ricerca reverse image del volto su Google Lens, Yandex, TinEye, PimEyes."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -207,20 +220,24 @@ async def osint_image_search(
         face_crop.save(buf, format="JPEG", quality=90)
         face_bytes = buf.getvalue()
 
-    results = await osint.search(face_bytes)
-    results["faces_detected"] = len(locations)
-    results["face_cropped"] = len(locations) > 0
-    return results
+    reverse = await osint.search(face_bytes)
+    reverse["faces_detected"] = len(locations)
+    reverse["face_cropped"] = len(locations) > 0
+
+    image_hash = reverse.get("image_hash")
+    run_id = osint_db.save_run(image_hash or "", target_name="", run_type="image", raw_json=reverse)
+    evidence = _build_evidence_from_reverse(reverse)
+    if evidence:
+        osint_db.save_evidence_batch(run_id, evidence)
+
+    return reverse
 
 @app.post("/osint/social")
 async def osint_social_search(
     body: OsintSearchRequest,
     token: str = Depends(verify_token),
 ):
-    """
-    Cerca profili social dato un nome e/o username.
-    Se run_maigret=True, esegue anche una ricerca Maigret completa.
-    """
+    """Cerca profili social dato un nome e/o username. Può usare Maigret."""
     result = {}
 
     if body.name:
@@ -249,13 +266,7 @@ async def osint_full(
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """
-    Pipeline OSINT completa:
-    1. Rileva e ritaglia il volto dall'immagine
-    2. Reverse image search (Google Lens, Yandex, TinEye)
-    3. Ricerca profili social per nome
-    4. Genera varianti username e cerca su Maigret (opzionale)
-    """
+    """Pipeline OSINT completa (reverse image + social + Maigret opzionale)."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -269,7 +280,7 @@ async def osint_full(
     if run_maigret and variants:
         maigret_results = await maigret.search_multiple(variants[:3])
 
-    return {
+    osint_data = {
         "target_name": name,
         "faces_detected": len(locations),
         "reverse_image": reverse,
@@ -278,6 +289,14 @@ async def osint_full(
         "username_variants": variants,
         "maigret": maigret_results,
     }
+
+    image_hash = reverse.get("image_hash")
+    run_id = osint_db.save_run(image_hash or "", target_name=name, run_type="full", raw_json=osint_data)
+    evidence = _build_evidence_from_reverse(reverse)
+    if evidence:
+        osint_db.save_evidence_batch(run_id, evidence)
+
+    return osint_data
 
 
 # — Endpoint Report PDF —
@@ -298,31 +317,11 @@ async def generate_pdf_report(
     run_maigret: bool = Form(False, description="Esegui Maigret per username discovery"),
     token: str = Depends(verify_token),
 ):
-    """
-    Pipeline OSINT completa + generazione PDF.
-
-    Esegue in sequenza:
-    1. Rilevamento e ritaglio del volto
-    2. Reverse image search
-    3. Social media lookup
-    4. Username discovery (Maigret, opzionale)
-    5. Generazione PDF con design dark-tech, grafici e tabelle
-
-    Restituisce direttamente il file PDF da scaricare.
-
-    Esempio curl:
-        curl -X POST http://localhost:8000/report/pdf \\
-             -H "Authorization: Bearer changeme" \\
-             -F "name=Mario Rossi" \\
-             -F "file=@volto.jpg" \\
-             -F "run_maigret=false" \\
-             --output report.pdf
-    """
+    """Pipeline OSINT completa + generazione PDF + salvataggio strutturato in DB OSINT."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
 
-    # Ritaglia il volto per includerlo nel PDF
     face_bytes = None
     if locations:
         top, right, bottom, left = locations[0]
@@ -336,7 +335,6 @@ async def generate_pdf_report(
         face_crop.save(buf, format="JPEG", quality=90)
         face_bytes = buf.getvalue()
 
-    # Esegui pipeline OSINT
     reverse = await osint.search(contents)
     social_results = await social.search_by_name(name)
     osint_links = social.generate_osint_report_links(name)
@@ -356,7 +354,12 @@ async def generate_pdf_report(
         "maigret": maigret_results,
     }
 
-    # Genera PDF
+    image_hash = reverse.get("image_hash")
+    run_id = osint_db.save_run(image_hash or "", target_name=name, run_type="pdf", raw_json=osint_data)
+    evidence = _build_evidence_from_reverse(reverse)
+    if evidence:
+        osint_db.save_evidence_batch(run_id, evidence)
+
     pdf_bytes = build_pdf(osint_data, face_bytes)
 
     safe_name = name.replace(" ", "_").lower()
@@ -367,6 +370,16 @@ async def generate_pdf_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# — OSINT stats —
+@app.get("/osint/stats")
+async def osint_stats(token: str = Depends(verify_token)):
+    """Statistiche di base e ultime run OSINT (per dashboard/monitoring)."""
+    runs = osint_db.get_recent_runs(limit=20)
+    return {
+        "recent_runs": runs,
+    }
 
 
 # — WebSocket —
