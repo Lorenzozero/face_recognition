@@ -9,10 +9,10 @@ Endpoint HTTP:
   POST /register        — registra volto noto nel DB
   GET  /known           — lista volti noti
   DELETE /known/{id}    — elimina volto noto
-  POST /osint/image     — reverse image search
+  POST /osint/image     — reverse image search (con caching)
   POST /osint/social    — ricerca social per nome/username
-  POST /osint/full      — pipeline OSINT completa
-  POST /report/pdf      — genera PDF OSINT completo
+  POST /osint/full      — pipeline OSINT completa (con caching + risk_score)
+  POST /report/pdf      — genera PDF OSINT completo (con risk_score)
   GET  /osint/stats     — statistiche e ultime run OSINT
   GET  /health          — health check
 
@@ -62,7 +62,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.1.0",
+    version="4.2.0",
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -111,73 +111,17 @@ class OsintSearchRequest(BaseModel):
     run_maigret: bool = False
 
 # — Helper —
+
 def load_image_from_upload(file: UploadFile) -> np.ndarray:
     contents = file.file.read()
     image = PIL.Image.open(io.BytesIO(contents)).convert("RGB")
     return np.array(image)
 
+
 def image_to_bytes(file: UploadFile) -> bytes:
     file.file.seek(0)
     return file.file.read()
 
-# — Health & root —
-@app.get("/health")
-def health():
-    return {"status": "ok", "version": "4.1.0"}
-
-@app.get("/", include_in_schema=False)
-def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.1"}
-
-# — Endpoint core riconoscimento —
-@app.post("/encode", response_model=EncodeResponse)
-def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)):
-    img = load_image_from_upload(file)
-    locations = face_recognition.face_locations(img)
-    encodings = face_recognition.face_encodings(img)
-    return EncodeResponse(
-        faces_found=len(encodings),
-        encodings=[e.tolist() for e in encodings],
-        locations=[list(loc) for loc in locations],
-    )
-
-@app.post("/detect", response_model=DetectResponse)
-def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token)):
-    img = load_image_from_upload(file)
-    locations = face_recognition.face_locations(img)
-    return DetectResponse(faces_found=len(locations), locations=[list(loc) for loc in locations])
-
-@app.post("/compare", response_model=CompareResponse)
-def compare_faces(body: CompareRequest, token: str = Depends(verify_token)):
-    enc_a = np.array(body.encoding_a)
-    enc_b = np.array(body.encoding_b)
-    distances = face_recognition.face_distance([enc_a], enc_b)
-    distance = float(distances[0])
-    return CompareResponse(match=distance <= body.tolerance, distance=round(distance, 4))
-
-@app.post("/register", response_model=RegisterResponse)
-def register_face(
-    name: str,
-    file: UploadFile = File(...),
-    token: str = Depends(verify_token),
-):
-    img = load_image_from_upload(file)
-    encodings = face_recognition.face_encodings(img)
-    if not encodings:
-        raise HTTPException(status_code=400, detail="Nessun volto trovato nell'immagine")
-    face_id = db.register(name, encodings[0])
-    return RegisterResponse(id=face_id, name=name, message=f"Volto di '{name}' registrato con ID {face_id}")
-
-@app.get("/known", response_model=List[KnownFace])
-def list_known_faces(token: str = Depends(verify_token)):
-    return db.list_known()
-
-@app.delete("/known/{face_id}")
-def delete_known_face(face_id: int, token: str = Depends(verify_token)):
-    db.delete(face_id)
-    return {"message": f"Volto ID {face_id} eliminato"}
-
-# — Endpoint OSINT —
 
 def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
     evidence = []
@@ -196,17 +140,111 @@ def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
     return evidence
 
 
+def _compute_risk_score(osint_data: dict) -> float:
+    """Calcolo semplice di risk_score: numero profili social trovati / 10 (max 1.0)."""
+    social = osint_data.get("social") or {}
+    profiles = social.get("platforms") or []
+    found_count = sum(1 for p in profiles if p.get("found"))
+    score = min(1.0, found_count / 10.0)
+    return float(score)
+
+
+# — Health & root —
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "4.2.0"}
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.2"}
+
+
+# — Endpoint core riconoscimento —
+@app.post("/encode", response_model=EncodeResponse)
+def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)):
+    img = load_image_from_upload(file)
+    locations = face_recognition.face_locations(img)
+    encodings = face_recognition.face_encodings(img)
+    return EncodeResponse(
+        faces_found=len(encodings),
+        encodings=[e.tolist() for e in encodings],
+        locations=[list(loc) for loc in locations],
+    )
+
+
+@app.post("/detect", response_model=DetectResponse)
+def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token)):
+    img = load_image_from_upload(file)
+    locations = face_recognition.face_locations(img)
+    return DetectResponse(faces_found=len(locations), locations=[list(loc) for loc in locations])
+
+
+@app.post("/compare", response_model=CompareResponse)
+def compare_faces(body: CompareRequest, token: str = Depends(verify_token)):
+    enc_a = np.array(body.encoding_a)
+    enc_b = np.array(body.encoding_b)
+    distances = face_recognition.face_distance([enc_a], enc_b)
+    distance = float(distances[0])
+    return CompareResponse(match=distance <= body.tolerance, distance=round(distance, 4))
+
+
+@app.post("/register", response_model=RegisterResponse)
+def register_face(
+    name: str,
+    file: UploadFile = File(...),
+    token: str = Depends(verify_token),
+):
+    img = load_image_from_upload(file)
+    encodings = face_recognition.face_encodings(img)
+    if not encodings:
+        raise HTTPException(status_code=400, detail="Nessun volto trovato nell'immagine")
+    face_id = db.register(name, encodings[0])
+    return RegisterResponse(id=face_id, name=name, message=f"Volto di '{name}' registrato con ID {face_id}")
+
+
+@app.get("/known", response_model=List[KnownFace])
+def list_known_faces(token: str = Depends(verify_token)):
+    return db.list_known()
+
+
+@app.delete("/known/{face_id}")
+def delete_known_face(face_id: int, token: str = Depends(verify_token)):
+    db.delete(face_id)
+    return {"message": f"Volto ID {face_id} eliminato"}
+
+
+# — Endpoint OSINT —
+
 @app.post("/osint/image")
 async def osint_image_search(
     file: UploadFile = File(...),
     token: str = Depends(verify_token),
 ):
-    """Ricerca reverse image del volto su Google Lens, Yandex, TinEye, PimEyes."""
+    """Ricerca reverse image del volto su Google Lens, Yandex, TinEye, PimEyes, con caching per image_hash."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
-    face_bytes = contents
 
+    # Caching per image_hash
+    image_hash = None
+    try:
+        import hashlib
+        image_hash = hashlib.md5(contents).hexdigest()[:8]
+    except Exception:
+        pass
+
+    if image_hash:
+        existing_runs = osint_db.get_runs_by_image_hash(image_hash)
+        if existing_runs:
+            # Usa l'ultima run salvata come cache
+            cached = osint_db.load_raw_run(existing_runs[0]["id"])
+            if cached:
+                cached["faces_detected"] = len(locations)
+                cached["from_cache"] = True
+                return cached
+
+    face_bytes = contents
     if locations:
         top, right, bottom, left = locations[0]
         h, w = img_array.shape[:2]
@@ -224,13 +262,15 @@ async def osint_image_search(
     reverse["faces_detected"] = len(locations)
     reverse["face_cropped"] = len(locations) > 0
 
-    image_hash = reverse.get("image_hash")
-    run_id = osint_db.save_run(image_hash or "", target_name="", run_type="image", raw_json=reverse)
+    image_hash = reverse.get("image_hash") or image_hash or ""
+    run_id = osint_db.save_run(image_hash, target_name="", run_type="image", raw_json=reverse)
     evidence = _build_evidence_from_reverse(reverse)
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
 
+    reverse["from_cache"] = False
     return reverse
+
 
 @app.post("/osint/social")
 async def osint_social_search(
@@ -259,6 +299,7 @@ async def osint_social_search(
 
     return result
 
+
 @app.post("/osint/full")
 async def osint_full(
     name: str = Form(...),
@@ -266,10 +307,28 @@ async def osint_full(
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa (reverse image + social + Maigret opzionale)."""
+    """Pipeline OSINT completa (reverse image + social + Maigret opzionale) con caching e risk_score."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
+
+    # Caching per image_hash
+    image_hash = None
+    try:
+        import hashlib
+        image_hash = hashlib.md5(contents).hexdigest()[:8]
+    except Exception:
+        pass
+
+    if image_hash:
+        existing_runs = osint_db.get_runs_by_image_hash(image_hash)
+        for r in existing_runs:
+            if r["run_type"] == "full":
+                cached = osint_db.load_raw_run(r["id"])
+                if cached:
+                    cached["faces_detected"] = len(locations)
+                    cached["from_cache"] = True
+                    return cached
 
     reverse = await osint.search(contents)
     social_results = await social.search_by_name(name)
@@ -290,12 +349,16 @@ async def osint_full(
         "maigret": maigret_results,
     }
 
-    image_hash = reverse.get("image_hash")
-    run_id = osint_db.save_run(image_hash or "", target_name=name, run_type="full", raw_json=osint_data)
+    risk_score = _compute_risk_score(osint_data)
+
+    image_hash = reverse.get("image_hash") or image_hash or ""
+    run_id = osint_db.save_run(image_hash, target_name=name, run_type="full", raw_json=osint_data, risk_score=risk_score)
     evidence = _build_evidence_from_reverse(reverse)
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
 
+    osint_data["risk_score"] = risk_score
+    osint_data["from_cache"] = False
     return osint_data
 
 
@@ -317,7 +380,7 @@ async def generate_pdf_report(
     run_maigret: bool = Form(False, description="Esegui Maigret per username discovery"),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa + generazione PDF + salvataggio strutturato in DB OSINT."""
+    """Pipeline OSINT completa + generazione PDF + salvataggio strutturato in DB OSINT con risk_score."""
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -354,11 +417,15 @@ async def generate_pdf_report(
         "maigret": maigret_results,
     }
 
-    image_hash = reverse.get("image_hash")
-    run_id = osint_db.save_run(image_hash or "", target_name=name, run_type="pdf", raw_json=osint_data)
+    risk_score = _compute_risk_score(osint_data)
+
+    image_hash = reverse.get("image_hash") or ""
+    run_id = osint_db.save_run(image_hash, target_name=name, run_type="pdf", raw_json=osint_data, risk_score=risk_score)
     evidence = _build_evidence_from_reverse(reverse)
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
+
+    osint_data["risk_score"] = risk_score
 
     pdf_bytes = build_pdf(osint_data, face_bytes)
 
@@ -386,6 +453,7 @@ async def osint_stats(token: str = Depends(verify_token)):
 @app.websocket("/ws/stream")
 async def websocket_webcam(websocket: WebSocket):
     await handle_webcam_stream(websocket)
+
 
 @app.websocket("/ws/rtsp")
 async def websocket_rtsp(websocket: WebSocket, url: str = Query(...)):
