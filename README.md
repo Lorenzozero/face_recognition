@@ -44,7 +44,7 @@ git clone https://github.com/Lorenzozero/face_recognition
 cd face_recognition
 pip install -r requirements_ng.txt
 
-# Opzionale: abilita Maigret per ricerca username su 3000+ siti
+# Opzionale: abilita Maigret per cerca username su 3000+ siti
 pip install maigret
 ```
 
@@ -108,7 +108,7 @@ Dato un volto (immagine) e/o un nome, il motore OSINT esegue automaticamente:
 
 ### Maigret — Username Discovery
 
-[Maigret](https://github.com/soxoj/maigret) cerca un username su **3000+ siti** simultaneamente.
+[Maigret](https://github.com/soxoj/maigret) cerca un username su **3000+ siti** simultaneamente.[web:92][web:84]
 
 ```python
 # Genera automaticamente varianti username dal nome completo
@@ -142,6 +142,79 @@ curl -X POST http://localhost:8000/osint/full \
   -F "file=@foto.jpg" \
   -F "run_maigret=true"
 ```
+
+---
+
+## Configurazione OSINT (ENV flags)
+
+Per ambienti diversi (lab, produzione, air-gapped) puoi controllare il motore OSINT via variabili d'ambiente:
+
+```bash
+# Disabilita chiamate esterne (solo link/local data)
+OSINT_ENABLE_EXTERNAL=false
+
+# Abilita/Disabilita Maigret
+OSINT_ENABLE_MAIGRET=true
+
+# Timeout massimo per HTTP OSINT
+OSINT_TIMEOUT=30
+
+# Limita numero di siti Maigret
+OSINT_MAX_SITES=500
+```
+
+- `OSINT_ENABLE_EXTERNAL=false` — `/osint/*` genera solo link e dati locali, senza chiamare siti esterni (utile in ambienti chiusi o senza internet).
+- `OSINT_ENABLE_MAIGRET=false` — salta completamente la parte di username discovery su 3000+ siti.[web:92][web:84]
+- `OSINT_TIMEOUT` — timeout di httpx per le chiamate OSINT (default consigliato: 30s).[web:83]
+- `OSINT_MAX_SITES` — limita il numero di siti che Maigret scansiona (es. 500 su 3000+), come suggerito nelle best practice OSINT.[web:93]
+
+---
+
+## Test e CI
+
+### Test unitari (mock)
+
+Per eseguire i test veloci con dipendenze leggere e mock dei moduli pesanti:
+
+```bash
+pip install -r requirements_test.txt
+pytest tests/ -v --tb=short -k "not integration"
+```
+
+Questi test verificano routing, auth, formati JSON e generazione PDF senza scaricare modelli InsightFace.
+
+### Test di integrazione reale (InsightFace + immagini vere)
+
+Per validare il backend InsightFace con immagini reali (`tests/test_images/obama.jpg`, `biden.jpg`):
+
+```bash
+pip install -r requirements_ng.txt
+pytest tests/test_integration_real.py -v --tb=short
+```
+
+Questi test controllano:
+- Rilevamento volto su `obama.jpg` e `biden.jpg`
+- Encoding 512D normalizzato (norma ≈ 1.0)
+- `compare_faces` e `face_distance` su stessa persona vs persone diverse.
+
+### Smoke test end-to-end
+
+Per verificare tutta l'API in locale con server reale:
+
+```bash
+# Terminale 1 — avvia server
+FR_API_TOKEN=changeme python api_server.py
+
+# Terminale 2 — esegui smoke test
+python smoke_test.py
+```
+
+Lo smoke test verifica:
+- `/health` — stato e versione
+- `/encode`, `/detect`, `/compare` — pipeline facciale base
+- `/register`, `/known`, `/known/{id}` — gestione DB volti
+- `/osint/image` — generazione link e metadata OSINT
+- `/report/pdf` — generazione PDF reale (`smoke_test_report.pdf` salvato su disco).
 
 ---
 
@@ -212,7 +285,8 @@ face_recognition/
 │   ├── conftest.py                    # Fixture condivise (TestClient, mock)
 │   ├── test_api_core.py               # Test endpoint core (encode, detect, compare)
 │   ├── test_api_osint.py              # Test endpoint OSINT
-│   └── test_report_pdf.py             # Test generatore PDF + endpoint /report/pdf
+│   ├── test_report_pdf.py             # Test generatore PDF + endpoint /report/pdf
+│   └── test_integration_real.py       # Test InsightFace reale con immagini vere
 ├── api_server.py                      # Server FastAPI + WebSocket + OSINT
 ├── report_generator.py                # Generatore PDF OSINT (dark design)
 ├── websocket_stream.py                # Gestore stream video WebSocket
@@ -220,7 +294,9 @@ face_recognition/
 ├── osint_engine.py                    # Reverse image search
 ├── social_lookup.py                   # Ricerca profili social + Google dorks
 ├── maigret_wrapper.py                 # Wrapper Maigret per username discovery
-├── requirements_ng.txt                # Dipendenze aggiornate
+├── requirements_ng.txt                # Dipendenze aggiornate (stack completo)
+├── requirements_test.txt              # Dipendenze leggere per test mockati
+├── smoke_test.py                      # Smoke test end-to-end
 └── examples/                          # Esempi di utilizzo
 ```
 
@@ -234,6 +310,7 @@ face_recognition/
 - [x] **Fase 4** — Dashboard web con webcam live, stream RTSP, DB volti noti
 - [x] **Fase 5** — Generazione automatica report PDF con grafici e tabelle
 - [x] **Fase 6** — Test suite pytest + CI GitHub Actions (Python 3.10 / 3.11 / 3.12)
+- [x] **Fase 7** — Test di integrazione reale + smoke test end-to-end + ENV tuning OSINT
 
 ---
 
@@ -261,7 +338,7 @@ face_recognition/
 | Username discovery | ❌ No | ✅ Maigret (3000+ siti) |
 | Report PDF | ❌ No | ✅ Dark design + grafici |
 | Test suite | ❌ No | ✅ pytest (3.10 / 3.11 / 3.12) |
-| CI/CD | ❌ No | ✅ GitHub Actions |
+| CI/CD | ❌ No | ✅ GitHub Actions (unit + integration real) |
 | Installazione | Complessa (C++) | Semplice (pip) |
 
 ---
