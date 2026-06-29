@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.6.0
+face_recognition-ng — FastAPI REST + WebSocket Server v4.6.1
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -19,6 +19,7 @@ Endpoint HTTP:
 
 Variabili ENV:
   FR_API_TOKEN             token autenticazione (default: changeme)
+  PORT                     porta su cui ascoltare (Railway la imposta automaticamente)
   OSINT_CACHE_TTL_HOURS    ore validita' cache OSINT (default: 24)
   RATE_LIMIT_ENABLED       true/false (default: true)
   RATE_LIMIT_WINDOW_SECS   finestra rate limit in secondi (default: 60)
@@ -72,17 +73,15 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     return credentials.credentials
 
 
-# — Lifespan (sostituisce @app.on_event) —
+# — Lifespan —
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: avvia cleanup rate limiter in background
     async def _cleanup_loop():
         while True:
             await asyncio.sleep(RATE_LIMIT_CLEANUP_SECS)
             limiter.cleanup_expired()
     task = asyncio.create_task(_cleanup_loop())
     yield
-    # Shutdown: cancella il task
     task.cancel()
 
 
@@ -90,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.6.0",
+    version="4.6.1",
     lifespan=lifespan,
 )
 
@@ -213,7 +212,6 @@ def _build_evidence_from_maigret(maigret_data: dict) -> List[dict]:
 
 
 def _compute_risk_score(osint_data: dict) -> float:
-    """Risk score pesato: social (40%) + Maigret (40%) + reverse image (20%)."""
     social_d = osint_data.get("social") or {}
     platforms = social_d.get("platforms") or []
     found_social = sum(1 for p in platforms if p.get("found"))
@@ -238,12 +236,12 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.6.0"}
+    return {"status": "ok", "version": "4.6.1"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.1"}
 
 
 # — Endpoint core riconoscimento —
@@ -300,228 +298,140 @@ def delete_known_face(face_id: int, token: str = Depends(verify_token)):
     return {"message": f"Volto ID {face_id} eliminato"}
 
 
-# — Endpoint OSINT —
+# — OSINT —
 
 @app.post("/osint/image")
-async def osint_image_search(
-    request: Request,
-    file: UploadFile = File(...),
-    token: str = Depends(verify_token),
-):
+async def osint_image_search(request: Request, file: UploadFile = File(...), token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_image", limit=LIMIT_OSINT_IMAGE)
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
     image_hash = _get_image_hash(contents)
-
     cached = osint_db.get_fresh_run(image_hash, run_type="image")
     if cached:
         cached["faces_detected"] = len(locations)
         cached["from_cache"] = True
         return cached
-
     face_bytes = contents
     if locations:
         top, right, bottom, left = locations[0]
         h, w = img_array.shape[:2]
         pad = 30
-        face_crop = PIL.Image.fromarray(
-            img_array[max(0, top-pad):min(h, bottom+pad), max(0, left-pad):min(w, right+pad)]
-        )
+        face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
         buf = io.BytesIO()
         face_crop.save(buf, format="JPEG", quality=90)
         face_bytes = buf.getvalue()
-
     reverse = await osint.search(face_bytes)
     reverse["faces_detected"] = len(locations)
     reverse["face_cropped"] = len(locations) > 0
     reverse["from_cache"] = False
-
     run_id = osint_db.save_run(image_hash, target_name="", run_type="image", raw_json=reverse)
     evidence = _build_evidence_from_reverse(reverse)
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
-
     return reverse
 
 
 @app.post("/osint/social")
-async def osint_social_search(
-    request: Request,
-    body: OsintSearchRequest,
-    token: str = Depends(verify_token),
-):
+async def osint_social_search(request: Request, body: OsintSearchRequest, token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_social", limit=LIMIT_OSINT_SOCIAL)
     result = {}
     image_hash = f"social:{body.name or ''}:{body.username or ''}"
-
     if body.name:
         result["by_name"] = await social.search_by_name(body.name)
         result["osint_links"] = social.generate_osint_report_links(body.name, body.username)
-
     if body.username:
         result["by_username"] = await social.search_by_username(body.username)
         if body.run_maigret:
             result["maigret"] = await maigret.search(body.username)
-
     if body.name and not body.username:
         variants = maigret.generate_username_variants(body.name)
         result["username_variants"] = variants
         if body.run_maigret and variants:
             result["maigret"] = await maigret.search_multiple(variants[:5])
-
     social_data = result.get("by_name") or result.get("by_username") or {}
     maigret_data = result.get("maigret") or {}
     evidence = _build_evidence_from_social(social_data) + _build_evidence_from_maigret(maigret_data)
     run_id = osint_db.save_run(image_hash, target_name=body.name or body.username or "", run_type="social", raw_json=result)
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
-
     return result
 
 
 @app.post("/osint/full")
-async def osint_full(
-    request: Request,
-    name: str = Form(...),
-    file: UploadFile = File(...),
-    run_maigret: bool = Form(False),
-    token: str = Depends(verify_token),
-):
+async def osint_full(request: Request, name: str = Form(...), file: UploadFile = File(...), run_maigret: bool = Form(False), token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_full", limit=LIMIT_OSINT_FULL)
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
     image_hash = _get_image_hash(contents)
-
     cached = osint_db.get_fresh_run(image_hash, run_type="full")
     if cached:
         cached["faces_detected"] = len(locations)
         cached["from_cache"] = True
         return cached
-
     reverse = await osint.search(contents)
     social_results = await social.search_by_name(name)
     osint_links = social.generate_osint_report_links(name)
     variants = maigret.generate_username_variants(name)
-
     maigret_results = None
     if run_maigret and variants:
         maigret_results = await maigret.search_multiple(variants[:3])
-
-    osint_data = {
-        "target_name": name,
-        "faces_detected": len(locations),
-        "reverse_image": reverse,
-        "social": social_results,
-        "osint_links": osint_links,
-        "username_variants": variants,
-        "maigret": maigret_results,
-    }
-
+    osint_data = {"target_name": name, "faces_detected": len(locations), "reverse_image": reverse, "social": social_results, "osint_links": osint_links, "username_variants": variants, "maigret": maigret_results}
     risk_score = _compute_risk_score(osint_data)
     osint_data["risk_score"] = risk_score
     osint_data["from_cache"] = False
-
     run_id = osint_db.save_run(image_hash, target_name=name, run_type="full", raw_json=osint_data, risk_score=risk_score)
-    evidence = (
-        _build_evidence_from_reverse(reverse)
-        + _build_evidence_from_social(social_results)
-        + _build_evidence_from_maigret(maigret_results or {})
-    )
+    evidence = _build_evidence_from_reverse(reverse) + _build_evidence_from_social(social_results) + _build_evidence_from_maigret(maigret_results or {})
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
-
     osint_data["run_id"] = run_id
     return osint_data
 
 
-# — Report PDF —
-@app.post(
-    "/report/pdf",
-    response_class=Response,
-    responses={200: {"content": {"application/pdf": {}}, "description": "PDF OSINT report scaricabile"}},
-)
-async def generate_pdf_report(
-    request: Request,
-    name: str = Form(...),
-    file: UploadFile = File(...),
-    run_maigret: bool = Form(False),
-    token: str = Depends(verify_token),
-):
+@app.post("/report/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}, "description": "PDF OSINT report"}})
+async def generate_pdf_report(request: Request, name: str = Form(...), file: UploadFile = File(...), run_maigret: bool = Form(False), token: str = Depends(verify_token)):
     limiter.check(request, tag="report_pdf", limit=LIMIT_OSINT_FULL)
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
-
     face_bytes = None
     if locations:
         top, right, bottom, left = locations[0]
         h, w = img_array.shape[:2]
         pad = 30
-        face_crop = PIL.Image.fromarray(
-            img_array[max(0, top-pad):min(h, bottom+pad), max(0, left-pad):min(w, right+pad)]
-        )
+        face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
         buf = io.BytesIO()
         face_crop.save(buf, format="JPEG", quality=90)
         face_bytes = buf.getvalue()
-
     reverse = await osint.search(contents)
     social_results = await social.search_by_name(name)
     osint_links = social.generate_osint_report_links(name)
     variants = maigret.generate_username_variants(name)
-
     maigret_results = None
     if run_maigret and variants:
         maigret_results = await maigret.search_multiple(variants[:3])
-
-    osint_data = {
-        "target_name": name,
-        "faces_detected": len(locations),
-        "reverse_image": reverse,
-        "social": social_results,
-        "osint_links": osint_links,
-        "username_variants": variants,
-        "maigret": maigret_results,
-    }
-
+    osint_data = {"target_name": name, "faces_detected": len(locations), "reverse_image": reverse, "social": social_results, "osint_links": osint_links, "username_variants": variants, "maigret": maigret_results}
     risk_score = _compute_risk_score(osint_data)
     osint_data["risk_score"] = risk_score
-
     image_hash = _get_image_hash(contents)
     run_id = osint_db.save_run(image_hash, target_name=name, run_type="pdf", raw_json=osint_data, risk_score=risk_score)
-    evidence = (
-        _build_evidence_from_reverse(reverse)
-        + _build_evidence_from_social(social_results)
-        + _build_evidence_from_maigret(maigret_results or {})
-    )
+    evidence = _build_evidence_from_reverse(reverse) + _build_evidence_from_social(social_results) + _build_evidence_from_maigret(maigret_results or {})
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
-
     pdf_bytes = build_pdf(osint_data, face_bytes)
     safe_name = name.replace(" ", "_").lower()
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="osint_report_{safe_name}.pdf"'},
-    )
+    return Response(content=pdf_bytes, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="osint_report_{safe_name}.pdf"'})
 
 
-# — OSINT stats + grafo —
 @app.get("/osint/stats")
 async def osint_stats(request: Request, token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
-    agg = osint_db.get_aggregate_stats()
-    recent = osint_db.get_recent_runs(limit=20)
-    return {**agg, "recent_runs": recent}
+    return {**osint_db.get_aggregate_stats(), "recent_runs": osint_db.get_recent_runs(limit=20)}
 
 
 @app.get("/osint/graph/{run_id}")
-async def osint_graph(
-    run_id: int,
-    request: Request,
-    token: str = Depends(verify_token),
-):
+async def osint_graph(run_id: int, request: Request, token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
     graph = osint_db.get_graph(run_id)
     if not graph["nodes"]:
@@ -529,7 +439,6 @@ async def osint_graph(
     return graph
 
 
-# — WebSocket —
 @app.websocket("/ws/stream")
 async def websocket_webcam(websocket: WebSocket):
     await handle_webcam_stream(websocket)
@@ -541,4 +450,5 @@ async def websocket_rtsp(websocket: WebSocket, url: str = Query(...)):
 
 
 if __name__ == "__main__":
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("api_server:app", host="0.0.0.0", port=port, reload=False)
