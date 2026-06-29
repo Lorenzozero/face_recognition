@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.5.0
+face_recognition-ng — FastAPI REST + WebSocket Server v4.6.0
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -38,6 +38,7 @@ import io
 import json
 import asyncio
 import numpy as np
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, status, WebSocket, Query, Form, Request
@@ -70,11 +71,27 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token non valido")
     return credentials.credentials
 
+
+# — Lifespan (sostituisce @app.on_event) —
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: avvia cleanup rate limiter in background
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(RATE_LIMIT_CLEANUP_SECS)
+            limiter.cleanup_expired()
+    task = asyncio.create_task(_cleanup_loop())
+    yield
+    # Shutdown: cancella il task
+    task.cancel()
+
+
 # — App —
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.5.0",
+    version="4.6.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -88,17 +105,6 @@ social = SocialLookup()
 maigret = MaigretWrapper()
 osint_db = OsintDatabase()
 limiter = RateLimiter()
-
-
-# — Background task: cleanup rate limiter —
-@app.on_event("startup")
-async def start_rate_limiter_cleanup():
-    """Avvia un task asincrono che pulisce le finestre scadute ogni RATE_LIMIT_CLEANUP_SECS."""
-    async def _cleanup_loop():
-        while True:
-            await asyncio.sleep(RATE_LIMIT_CLEANUP_SECS)
-            limiter.cleanup_expired()
-    asyncio.create_task(_cleanup_loop())
 
 
 # — Modelli —
@@ -232,12 +238,12 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.5.0"}
+    return {"status": "ok", "version": "4.6.0"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.5"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6"}
 
 
 # — Endpoint core riconoscimento —
@@ -302,9 +308,7 @@ async def osint_image_search(
     file: UploadFile = File(...),
     token: str = Depends(verify_token),
 ):
-    """Reverse image search con cache TTL e rate limit (3 req/60s per IP)."""
     limiter.check(request, tag="osint_image", limit=LIMIT_OSINT_IMAGE)
-
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -347,9 +351,7 @@ async def osint_social_search(
     body: OsintSearchRequest,
     token: str = Depends(verify_token),
 ):
-    """Cerca profili social con rate limit (10 req/60s per IP)."""
     limiter.check(request, tag="osint_social", limit=LIMIT_OSINT_SOCIAL)
-
     result = {}
     image_hash = f"social:{body.name or ''}:{body.username or ''}"
 
@@ -386,9 +388,7 @@ async def osint_full(
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa con cache TTL, risk_score pesato, rate limit (2 req/60s)."""
     limiter.check(request, tag="osint_full", limit=LIMIT_OSINT_FULL)
-
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -432,6 +432,7 @@ async def osint_full(
     if evidence:
         osint_db.save_evidence_batch(run_id, evidence)
 
+    osint_data["run_id"] = run_id
     return osint_data
 
 
@@ -448,9 +449,7 @@ async def generate_pdf_report(
     run_maigret: bool = Form(False),
     token: str = Depends(verify_token),
 ):
-    """Pipeline OSINT completa + PDF con risk_score + rate limit (2 req/60s)."""
     limiter.check(request, tag="report_pdf", limit=LIMIT_OSINT_FULL)
-
     contents = await file.read()
     img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
     locations = face_recognition.face_locations(img_array)
@@ -511,7 +510,6 @@ async def generate_pdf_report(
 # — OSINT stats + grafo —
 @app.get("/osint/stats")
 async def osint_stats(request: Request, token: str = Depends(verify_token)):
-    """Stats aggregate: totale run, risk_score, run/tipo, evidenze per fonte, top target."""
     limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
     agg = osint_db.get_aggregate_stats()
     recent = osint_db.get_recent_runs(limit=20)
@@ -524,7 +522,6 @@ async def osint_graph(
     request: Request,
     token: str = Depends(verify_token),
 ):
-    """Export grafo nodi/archi per una run OSINT. Compatibile con Neo4j / vis.js."""
     limiter.check(request, tag="osint_stats", limit=LIMIT_OSINT_STATS)
     graph = osint_db.get_graph(run_id)
     if not graph["nodes"]:
