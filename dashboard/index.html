@@ -1,440 +1,893 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>face_recognition-ng — Dashboard</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #22263a;
-      --border: #2e3350;
-      --text: #e2e8f0;
-      --muted: #8892b0;
-      --accent: #64ffda;
-      --accent2: #7c3aed;
-      --danger: #f87171;
-      --success: #4ade80;
-      --pdf: #ff6b35;
-      --font: 'Inter', system-ui, sans-serif;
-    }
-    body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
-    header {
-      padding: 1rem 2rem;
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    header h1 { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
-    header span { font-size: 0.75rem; color: var(--muted); }
-    .badge { background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.7rem; }
-    .badge.live { background: #14532d; border-color: var(--success); color: var(--success); }
-    .badge.offline { background: #450a0a; border-color: var(--danger); color: var(--danger); }
-    main { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; padding: 1.5rem 2rem; height: calc(100vh - 60px); }
-    .video-panel { display: flex; flex-direction: column; gap: 1rem; }
-    .canvas-wrapper {
-      position: relative; background: var(--surface); border: 1px solid var(--border);
-      border-radius: 0.75rem; overflow: hidden; flex: 1; min-height: 0;
-    }
-    #videoEl { width: 100%; height: 100%; object-fit: cover; display: block; }
-    #overlayCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-    .controls { display: flex; gap: 0.75rem; flex-wrap: wrap; }
-    button {
-      padding: 0.5rem 1.25rem; border-radius: 0.5rem; border: 1px solid var(--border);
-      background: var(--surface2); color: var(--text); font-size: 0.85rem; cursor: pointer;
-      transition: all 0.15s;
-    }
-    button:hover { border-color: var(--accent); color: var(--accent); }
-    button.primary { background: var(--accent); color: #0f1117; border-color: var(--accent); font-weight: 600; }
-    button.primary:hover { opacity: 0.85; }
-    button.danger { background: #450a0a; border-color: var(--danger); color: var(--danger); }
-    button.pdf-btn {
-      background: var(--pdf); color: #0f1117; border-color: var(--pdf);
-      font-weight: 700; width: 100%; margin-top: 0.5rem; font-size: 0.9rem;
-      padding: 0.6rem;
-    }
-    button.pdf-btn:hover { opacity: 0.85; color: #0f1117; border-color: var(--pdf); }
-    button.pdf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    input[type=text], input[type=file] {
-      padding: 0.5rem 0.75rem; background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 0.5rem; color: var(--text); font-size: 0.85rem; outline: none; flex: 1;
-    }
-    input[type=text]:focus { border-color: var(--accent); }
-    input[type=file] { padding: 0.4rem 0.5rem; cursor: pointer; }
-    input[type=file]::-webkit-file-upload-button {
-      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
-      border-radius: 0.35rem; padding: 0.25rem 0.6rem; cursor: pointer; font-size: 0.8rem;
-    }
-    .sidebar { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
-    .card {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; padding: 1rem;
-    }
-    .card.pdf-card { border-color: var(--pdf); background: #1a1207; }
-    .card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.75rem; }
-    .card.pdf-card h3 { color: var(--pdf); }
-    .stat-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.9rem; }
-    .stat-val { font-weight: 700; color: var(--accent); font-size: 1.4rem; }
-    #faceList { display: flex; flex-direction: column; gap: 0.5rem; max-height: 200px; overflow-y: auto; }
-    .face-item {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 0.4rem 0.6rem; background: var(--surface2); border-radius: 0.5rem; font-size: 0.82rem;
-    }
-    .face-item .name { font-weight: 500; }
-    .face-item .conf { color: var(--accent); font-size: 0.75rem; }
-    .face-item.unknown .name { color: var(--muted); }
-    .log { font-family: monospace; font-size: 0.75rem; color: var(--muted); max-height: 160px; overflow-y: auto; }
-    .log-entry { padding: 0.15rem 0; border-bottom: 1px solid var(--border); }
-    .log-entry.match { color: var(--success); }
-    .log-entry.error { color: var(--danger); }
-    .log-entry.pdf  { color: var(--pdf); }
-    .rtsp-row { display: flex; gap: 0.5rem; }
-    .token-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
-    #knownList { display: flex; flex-direction: column; gap: 0.4rem; max-height: 180px; overflow-y: auto; }
-    .known-item {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 0.35rem 0.6rem; background: var(--surface2); border-radius: 0.4rem; font-size: 0.8rem;
-    }
-    .del-btn { color: var(--danger); cursor: pointer; font-size: 0.75rem; padding: 0.1rem 0.4rem; border: 1px solid var(--danger); border-radius: 0.3rem; background: none; }
-    .pdf-field { display: flex; flex-direction: column; gap: 0.5rem; }
-    .pdf-field label { font-size: 0.75rem; color: var(--muted); }
-    .pdf-status {
-      font-size: 0.78rem; text-align: center; padding: 0.4rem;
-      border-radius: 0.4rem; margin-top: 0.4rem; display: none;
-    }
-    .pdf-status.loading { background: #1a1a2e; border: 1px solid var(--accent2); color: var(--accent2); display: block; }
-    .pdf-status.success { background: #0d2b1a; border: 1px solid var(--success); color: var(--success); display: block; }
-    .pdf-status.error   { background: #2b0d0d; border: 1px solid var(--danger); color: var(--danger); display: block; }
-    .maigret-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
-    .maigret-row label { font-size: 0.8rem; color: var(--muted); cursor: pointer; }
-    input[type=checkbox] { accent-color: var(--pdf); width: 14px; height: 14px; cursor: pointer; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>face_recognition-ng</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0c10;
+  --s1:#111318;
+  --s2:#181b22;
+  --s3:#1e222c;
+  --bd:#272d3d;
+  --tx:#e2e8f0;
+  --mu:#566070;
+  --ac:#00e5c4;
+  --ac2:#7c3aed;
+  --re:#f87171;
+  --gr:#4ade80;
+  --or:#fb923c;
+  --bl:#60a5fa;
+  --fn:'Inter',system-ui,sans-serif;
+  --r:0.625rem;
+}
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* TOPBAR */
+.topbar{
+  height:52px;background:var(--s1);border-bottom:1px solid var(--bd);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.5rem;flex-shrink:0;gap:1rem;
+}
+.topbar-left{display:flex;align-items:center;gap:1rem}
+.logo{font-size:.95rem;font-weight:700;color:var(--ac);letter-spacing:-.01em}
+.pill{
+  font-size:.68rem;padding:.2rem .65rem;border-radius:999px;
+  border:1px solid var(--bd);background:var(--s2);color:var(--mu);
+}
+.pill.live{background:#0d2b1a;border-color:var(--gr);color:var(--gr)}
+.pill.off{background:#2b0d0d;border-color:var(--re);color:var(--re)}
+.topbar-right{display:flex;align-items:center;gap:.75rem}
+#tokenInput{
+  background:var(--s2);border:1px solid var(--bd);border-radius:.4rem;
+  color:var(--tx);font-size:.78rem;padding:.3rem .6rem;width:160px;outline:none;
+}
+#tokenInput:focus{border-color:var(--ac)}
+
+/* MAIN LAYOUT */
+.workspace{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:0;
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+
+/* PANELS */
+.panel{
+  display:flex;flex-direction:column;
+  border-right:1px solid var(--bd);
+  overflow:hidden;
+}
+.panel:last-child{border-right:none}
+.panel-header{
+  height:40px;background:var(--s1);border-bottom:1px solid var(--bd);
+  display:flex;align-items:center;padding:0 1rem;gap:.6rem;flex-shrink:0;
+}
+.panel-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--mu)}
+.panel-body{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+
+/* ============ LEFT PANEL — CAMERA ============ */
+.cam-area{
+  flex:1;position:relative;background:#000;overflow:hidden;min-height:0;
+}
+#videoEl{width:100%;height:100%;object-fit:cover;display:block}
+#overlayCanvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.cam-controls{
+  padding:.75rem 1rem;
+  background:var(--s1);border-top:1px solid var(--bd);
+  display:flex;flex-direction:column;gap:.5rem;flex-shrink:0;
+}
+.btn-row{display:flex;gap:.5rem;flex-wrap:wrap}
+btn,.btn{
+  padding:.42rem 1rem;border-radius:.45rem;border:1px solid var(--bd);
+  background:var(--s2);color:var(--tx);font-size:.8rem;cursor:pointer;
+  font-family:var(--fn);transition:border-color .12s,color .12s;
+  white-space:nowrap;
+}
+btn:hover,.btn:hover{border-color:var(--ac);color:var(--ac)}
+.btn-primary{background:var(--ac);color:#0a0c10;border-color:var(--ac);font-weight:700}
+.btn-primary:hover{opacity:.88;color:#0a0c10;border-color:var(--ac)}
+.btn-danger{border-color:var(--re);color:var(--re);background:#2b0d0d}
+.btn-sm{padding:.3rem .7rem;font-size:.73rem}
+.inp{
+  padding:.42rem .7rem;background:var(--s2);border:1px solid var(--bd);
+  border-radius:.45rem;color:var(--tx);font-size:.8rem;outline:none;flex:1;
+}
+.inp:focus{border-color:var(--ac)}
+
+/* face list strip */
+.face-strip{
+  padding:.5rem 1rem;
+  background:var(--s2);border-top:1px solid var(--bd);
+  display:flex;gap:.4rem;flex-wrap:wrap;flex-shrink:0;
+  min-height:36px;
+}
+.face-tag{
+  font-size:.72rem;padding:.2rem .6rem;border-radius:999px;
+  border:1px solid var(--ac);color:var(--ac);background:rgba(0,229,196,.08);
+}
+.face-tag.unk{border-color:var(--re);color:var(--re);background:rgba(248,113,113,.08)}
+
+/* ============ RIGHT PANEL — OSINT ============ */
+.osint-body{
+  display:flex;flex-direction:column;gap:0;flex:1;overflow:hidden;
+}
+
+/* TARGET INPUT */
+.target-bar{
+  padding:.75rem 1rem;
+  background:var(--s1);border-bottom:1px solid var(--bd);
+  display:flex;gap:.5rem;align-items:center;flex-shrink:0;
+}
+
+/* PROGRESS */
+.progress-wrap{
+  padding:.6rem 1rem;
+  background:var(--s2);border-bottom:1px solid var(--bd);
+  flex-shrink:0;
+}
+.progress-meta{
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:.35rem;
+}
+.progress-label{font-size:.72rem;color:var(--mu)}
+.progress-pct{font-size:.9rem;font-weight:700;color:var(--ac)}
+.progress-bar-bg{
+  height:5px;background:var(--s3);border-radius:999px;overflow:hidden;
+}
+.progress-bar-fill{
+  height:100%;background:var(--ac);border-radius:999px;
+  transition:width .4s cubic-bezier(.4,0,.2,1);
+  width:0%;
+}
+.progress-steps{
+  margin-top:.4rem;display:flex;gap:.3rem;flex-wrap:wrap;
+}
+.step-dot{
+  font-size:.65rem;padding:.15rem .55rem;border-radius:999px;
+  border:1px solid var(--bd);color:var(--mu);background:var(--s3);
+}
+.step-dot.done{border-color:var(--gr);color:var(--gr);background:#0d2b1a}
+.step-dot.active{border-color:var(--ac);color:var(--ac);background:rgba(0,229,196,.1);animation:pulse 1s infinite}
+.step-dot.err{border-color:var(--re);color:var(--re);background:#2b0d0d}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* TABS */
+.tab-bar{
+  display:flex;border-bottom:1px solid var(--bd);background:var(--s1);flex-shrink:0;
+}
+.tab{
+  padding:.55rem 1.1rem;font-size:.75rem;font-weight:500;color:var(--mu);
+  cursor:pointer;border-bottom:2px solid transparent;
+  transition:color .12s;
+}
+.tab.active{color:var(--ac);border-bottom-color:var(--ac)}
+.tab-content{flex:1;overflow-y:auto;min-height:0}
+.tab-pane{display:none;padding:1rem}
+.tab-pane.active{display:block}
+
+/* REASONING LOG */
+.reason-log{
+  display:flex;flex-direction:column;gap:.4rem;
+}
+.reason-entry{
+  display:flex;gap:.6rem;align-items:flex-start;
+  padding:.5rem .7rem;border-radius:.45rem;
+  background:var(--s2);border:1px solid var(--bd);
+  font-size:.78rem;line-height:1.5;
+}
+.reason-entry .ic{
+  font-size:.85rem;flex-shrink:0;margin-top:.05rem;
+}
+.reason-entry.step .ic{color:var(--bl)}
+.reason-entry.found .ic{color:var(--gr)}
+.reason-entry.warn .ic{color:var(--or)}
+.reason-entry.err .ic{color:var(--re)}
+.reason-entry .ts{font-size:.65rem;color:var(--mu);margin-left:auto;flex-shrink:0;margin-top:.1rem}
+
+/* EVIDENCE TABLE */
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+thead th{
+  text-align:left;padding:.45rem .6rem;
+  border-bottom:1px solid var(--bd);color:var(--mu);
+  font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;
+  background:var(--s1);position:sticky;top:0;
+}
+tbody tr{border-bottom:1px solid var(--bd);transition:background .1s}
+tbody tr:hover{background:var(--s2)}
+td{padding:.45rem .6rem;vertical-align:middle}
+.badge-src{
+  font-size:.65rem;padding:.15rem .5rem;border-radius:999px;
+  border:1px solid;display:inline-block;
+}
+.badge-src.google_lens{border-color:#4285f4;color:#4285f4}
+.badge-src.yandex{border-color:#f00;color:#f00}
+.badge-src.tineye{border-color:var(--or);color:var(--or)}
+.badge-src.maigret{border-color:var(--ac2);color:var(--ac2)}
+.badge-src.social{border-color:var(--gr);color:var(--gr)}
+.conf-bar{height:4px;border-radius:999px;background:var(--ac);display:inline-block;vertical-align:middle}
+.ext-link{color:var(--bl);text-decoration:none;font-size:.73rem}
+.ext-link:hover{text-decoration:underline}
+
+/* GRAPH */
+.graph-wrap{
+  position:relative;background:var(--s2);border-radius:.5rem;
+  border:1px solid var(--bd);overflow:hidden;
+  min-height:320px;
+}
+#graphCanvas{width:100%;display:block}
+.graph-legend{
+  display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.6rem;
+}
+.legend-item{display:flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--mu)}
+.legend-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+/* STATS CARDS */
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.stat-card{
+  background:var(--s2);border:1px solid var(--bd);border-radius:.5rem;
+  padding:.75rem;text-align:center;
+}
+.stat-card .val{font-size:1.6rem;font-weight:700;color:var(--ac);line-height:1}
+.stat-card .lbl{font-size:.68rem;color:var(--mu);margin-top:.25rem;text-transform:uppercase;letter-spacing:.04em}
+.risk-gauge{
+  margin-top:.75rem;background:var(--s2);border:1px solid var(--bd);
+  border-radius:.5rem;padding:.75rem;
+}
+.risk-title{font-size:.72rem;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5rem}
+.risk-bar-bg{height:10px;background:var(--s3);border-radius:999px;overflow:hidden}
+.risk-bar-fill{
+  height:100%;border-radius:999px;
+  transition:width .6s cubic-bezier(.4,0,.2,1);
+  width:0%;
+}
+.risk-label{
+  display:flex;justify-content:space-between;
+  font-size:.72rem;color:var(--mu);margin-top:.3rem;
+}
+
+/* BOTTOM LOG */
+.bottom-log{
+  height:90px;background:var(--s1);border-top:1px solid var(--bd);
+  overflow-y:auto;padding:.4rem .8rem;flex-shrink:0;
+  font-family:monospace;font-size:.7rem;color:var(--mu);
+}
+.bl-entry{padding:.1rem 0;border-bottom:1px solid rgba(255,255,255,.03)}
+.bl-entry.ok{color:var(--gr)}
+.bl-entry.er{color:var(--re)}
+.bl-entry.info{color:var(--bl)}
+
+/* PDF SECTION */
+.pdf-section{padding:1rem;display:flex;flex-direction:column;gap:.6rem}
+.pdf-section label{font-size:.72rem;color:var(--mu)}
+.pdf-status{
+  font-size:.75rem;padding:.4rem .6rem;border-radius:.4rem;
+  border:1px solid var(--bd);display:none;
+}
+.pdf-status.loading{display:block;border-color:var(--ac2);color:var(--ac2);background:rgba(124,58,237,.08)}
+.pdf-status.success{display:block;border-color:var(--gr);color:var(--gr);background:#0d2b1a}
+.pdf-status.error{display:block;border-color:var(--re);color:var(--re);background:#2b0d0d}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:999px}
+</style>
 </head>
 <body>
-<header>
-  <h1>&#9889; face_recognition-ng</h1>
-  <div style="display:flex;gap:0.75rem;align-items:center">
-    <span id="statusBadge" class="badge offline">&#9679; Offline</span>
-    <span class="badge" id="fpsBadge">0 FPS</span>
-  </div>
-</header>
 
-<main>
-  <!-- Video Panel -->
-  <div class="video-panel">
-    <div class="canvas-wrapper">
-      <video id="videoEl" autoplay muted playsinline></video>
-      <canvas id="overlayCanvas"></canvas>
-    </div>
-    <div class="controls">
-      <button class="primary" id="startBtn" onclick="startWebcam()">&#9654; Avvia Webcam</button>
-      <button id="stopBtn" onclick="stopStream()" disabled>&#9209; Stop</button>
-      <button onclick="captureAndRegister()">&#128248; Registra Volto</button>
-    </div>
-    <div class="rtsp-row">
-      <input type="text" id="rtspUrl" placeholder="rtsp://192.168.1.100:554/stream" />
-      <button onclick="startRTSP()">&#127909; Connetti RTSP</button>
-    </div>
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="logo">&#9889; face_recognition-ng</span>
+    <span class="pill" id="camBadge">&#9679; Cam off</span>
+    <span class="pill" id="wsBadge">&#9679; WS off</span>
+    <span class="pill" id="fpsBadge">0 FPS</span>
   </div>
+  <div class="topbar-right">
+    <input type="text" id="tokenInput" placeholder="API token" value="changeme">
+  </div>
+</div>
 
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <!-- Config -->
-    <div class="card">
-      <h3>Configurazione</h3>
-      <div class="token-row">
-        <input type="text" id="tokenInput" placeholder="FR_API_TOKEN" value="changeme" />
+<!-- WORKSPACE -->
+<div class="workspace">
+
+  <!-- LEFT: CAMERA -->
+  <div class="panel">
+    <div class="panel-header">
+      <span style="font-size:.75rem">&#127909;</span>
+      <span class="panel-title">Camera & Riconoscimento</span>
+    </div>
+    <div class="panel-body">
+      <div class="cam-area">
+        <video id="videoEl" autoplay muted playsinline></video>
+        <canvas id="overlayCanvas"></canvas>
       </div>
-      <div class="stat-row"><span>Server</span><span style="color:var(--muted);font-size:0.8rem">localhost:8000</span></div>
-    </div>
-
-    <!-- Stats -->
-    <div class="card">
-      <h3>Statistiche Live</h3>
-      <div class="stat-row"><span>Volti rilevati</span><span class="stat-val" id="faceCount">0</span></div>
-      <div class="stat-row"><span>Riconosciuti</span><span style="color:var(--success);font-weight:600" id="matchCount">0</span></div>
-      <div id="faceList"></div>
-    </div>
-
-    <!-- PDF Report -->
-    <div class="card pdf-card">
-      <h3>&#128196; Genera Report PDF OSINT</h3>
-      <div class="pdf-field">
-        <label>Nome target</label>
-        <input type="text" id="pdfName" placeholder="Es. Mario Rossi" />
-        <label style="margin-top:0.25rem">Immagine volto</label>
-        <input type="file" id="pdfFile" accept="image/*" />
-        <div class="maigret-row">
-          <input type="checkbox" id="pdfMaigret" />
-          <label for="pdfMaigret">Includi Maigret (lento ~60s)</label>
+      <div class="face-strip" id="faceStrip">
+        <span style="color:var(--mu);font-size:.72rem">Nessun volto rilevato</span>
+      </div>
+      <div class="cam-controls">
+        <div class="btn-row">
+          <button class="btn btn-primary" id="startBtn" onclick="startWebcam()">&#9654; Webcam</button>
+          <button class="btn" id="stopBtn" onclick="stopStream()" disabled>&#9209; Stop</button>
+          <button class="btn" onclick="captureAndRegister()">&#128248; Registra</button>
+          <button class="btn" onclick="loadKnown()">&#128260; Volti noti</button>
+        </div>
+        <div class="btn-row">
+          <input class="inp" id="rtspUrl" placeholder="rtsp://... (IP camera)">
+          <button class="btn" onclick="startRTSP()">&#127909; RTSP</button>
         </div>
       </div>
-      <button class="pdf-btn" id="pdfBtn" onclick="generatePdfReport()">
-        &#11015; Scarica Report PDF
-      </button>
-      <div class="pdf-status" id="pdfStatus"></div>
-    </div>
-
-    <!-- Volti noti -->
-    <div class="card">
-      <h3>Volti Noti nel DB</h3>
-      <div id="knownList"><span style="color:var(--muted);font-size:0.8rem">Nessun volto registrato</span></div>
-      <button style="margin-top:0.75rem;width:100%" onclick="loadKnown()">&#128260; Aggiorna lista</button>
-    </div>
-
-    <!-- Log -->
-    <div class="card">
-      <h3>Log eventi</h3>
-      <div class="log" id="eventLog"></div>
     </div>
   </div>
-</main>
+
+  <!-- RIGHT: OSINT -->
+  <div class="panel">
+    <div class="panel-header">
+      <span style="font-size:.75rem">&#128270;</span>
+      <span class="panel-title">OSINT Intelligence</span>
+    </div>
+    <div class="panel-body osint-body">
+
+      <!-- Target bar -->
+      <div class="target-bar">
+        <input class="inp" id="targetName" placeholder="Nome target (es. Mario Rossi)">
+        <input type="file" id="targetFile" accept="image/*" style="display:none" onchange="handleFileSelect()">
+        <button class="btn btn-sm" onclick="document.getElementById('targetFile').click()">&#128247; Foto</button>
+        <button class="btn btn-primary btn-sm" onclick="runOsintFull()">&#9654; Analizza</button>
+        <button class="btn btn-sm" style="border-color:var(--or);color:var(--or)" onclick="captureForOsint()">&#128249; Usa cam</button>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-meta">
+          <span class="progress-label" id="progressLabel">In attesa...</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-steps" id="progressSteps"></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-bar">
+        <div class="tab active" data-tab="reasoning" onclick="switchTab('reasoning')">&#129504; Ragionamento</div>
+        <div class="tab" data-tab="evidence" onclick="switchTab('evidence')">&#128203; Evidenze</div>
+        <div class="tab" data-tab="graph" onclick="switchTab('graph')">&#9178; Grafo</div>
+        <div class="tab" data-tab="stats" onclick="switchTab('stats')">&#128200; Stats</div>
+        <div class="tab" data-tab="pdf" onclick="switchTab('pdf')">&#128196; PDF</div>
+      </div>
+
+      <div class="tab-content">
+
+        <!-- REASONING -->
+        <div class="tab-pane active" id="pane-reasoning">
+          <div class="reason-log" id="reasonLog">
+            <div class="reason-entry step">
+              <span class="ic">&#8505;</span>
+              <span>Inserisci un nome target e una foto (o usa la webcam), poi premi <strong>Analizza</strong>.</span>
+              <span class="ts">--:--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- EVIDENCE -->
+        <div class="tab-pane" id="pane-evidence">
+          <table>
+            <thead>
+              <tr><th>Fonte</th><th>Tipo</th><th>URL / Info</th><th>Conf.</th></tr>
+            </thead>
+            <tbody id="evidenceTable">
+              <tr><td colspan="4" style="color:var(--mu);padding:.75rem .6rem">Nessuna evidenza ancora raccolta.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- GRAPH -->
+        <div class="tab-pane" id="pane-graph">
+          <div class="graph-wrap">
+            <canvas id="graphCanvas" height="320"></canvas>
+          </div>
+          <div class="graph-legend">
+            <div class="legend-item"><span class="legend-dot" style="background:var(--ac)"></span>Persona</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--bl)"></span>Account social</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--or)"></span>Sito/Motore</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--ac2)"></span>Maigret hit</div>
+          </div>
+        </div>
+
+        <!-- STATS -->
+        <div class="tab-pane" id="pane-stats">
+          <div class="stats-grid">
+            <div class="stat-card"><div class="val" id="statTotal">—</div><div class="lbl">Run totali</div></div>
+            <div class="stat-card"><div class="val" id="statAvgRisk">—</div><div class="lbl">Risk medio</div></div>
+            <div class="stat-card"><div class="val" id="statEvidence">—</div><div class="lbl">Evidenze</div></div>
+            <div class="stat-card"><div class="val" id="statSources">—</div><div class="lbl">Fonti attive</div></div>
+          </div>
+          <div class="risk-gauge">
+            <div class="risk-title">Risk score — ultima run</div>
+            <div class="risk-bar-bg"><div class="risk-bar-fill" id="riskFill"></div></div>
+            <div class="risk-label"><span>0%</span><span id="riskPct">—</span><span>100%</span></div>
+          </div>
+        </div>
+
+        <!-- PDF -->
+        <div class="tab-pane" id="pane-pdf">
+          <div class="pdf-section">
+            <label>Nome target (pre-compilato dal campo OSINT)</label>
+            <input class="inp" id="pdfName" placeholder="Mario Rossi">
+            <label>Immagine volto</label>
+            <input type="file" id="pdfFile" accept="image/*" style="margin-top:.2rem">
+            <div style="display:flex;align-items:center;gap:.5rem;margin-top:.1rem">
+              <input type="checkbox" id="pdfMaigret" style="accent-color:var(--ac)">
+              <label for="pdfMaigret" style="cursor:pointer">Includi Maigret (~60s)</label>
+            </div>
+            <button class="btn" style="background:var(--or);color:#0a0c10;border-color:var(--or);font-weight:700;margin-top:.25rem" onclick="generatePdf()">
+              &#11015; Scarica Report PDF
+            </button>
+            <div class="pdf-status" id="pdfStatus"></div>
+          </div>
+        </div>
+
+      </div><!-- tab-content -->
+
+    </div><!-- osint-body -->
+  </div><!-- right panel -->
+
+</div><!-- workspace -->
+
+<!-- BOTTOM LOG -->
+<div class="bottom-log" id="bottomLog"></div>
 
 <script>
-  let ws = null;
-  let stream = null;
-  let lastFrameTime = Date.now();
-  let frameCount = 0;
-  let totalMatches = 0;
-  let streamMode = 'webcam';
+// ─── STATE ───────────────────────────────────────────────────────
+let ws = null, camStream = null, frameCount = 0, lastFpsTime = Date.now();
+let osintRunId = null, capturedImageBlob = null;
+const STEPS = ['Hashing','Reverse Image','Social Lookup','Maigret','Risk Score','Grafo'];
 
-  const video = document.getElementById('videoEl');
-  const canvas = document.getElementById('overlayCanvas');
-  const ctx = canvas.getContext('2d');
+// ─── UTILS ───────────────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const ts = () => new Date().toLocaleTimeString();
+const token = () => $('tokenInput').value.trim() || 'changeme';
+const API  = (p,o={}) => fetch(p,{headers:{'Authorization':'Bearer '+token()},...o});
 
-  function token() { return document.getElementById('tokenInput').value; }
+function bLog(msg,cls=''){
+  const el=$('bottomLog'),d=document.createElement('div');
+  d.className='bl-entry '+cls;
+  d.textContent=`[${ts()}] ${msg}`;
+  el.prepend(d);
+  if(el.children.length>80)el.removeChild(el.lastChild);
+}
 
-  function log(msg, type = '') {
-    const el = document.getElementById('eventLog');
-    const entry = document.createElement('div');
-    entry.className = 'log-entry ' + type;
-    entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    el.prepend(entry);
-    if (el.children.length > 50) el.removeChild(el.lastChild);
+function addReason(msg,type='step'){
+  const icons={step:'&#8505;',found:'&#10003;',warn:'&#9888;',err:'&#9747;'};
+  const el=$('reasonLog'),d=document.createElement('div');
+  d.className='reason-entry '+type;
+  d.innerHTML=`<span class="ic">${icons[type]||'&#8505;'}</span><span>${msg}</span><span class="ts">${ts()}</span>`;
+  el.prepend(d);
+}
+
+// ─── TABS ─────────────────────────────────────────────────────────
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+name));
+  if(name==='graph'&&osintRunId)loadGraph(osintRunId);
+  if(name==='stats')loadStats();
+}
+
+// ─── PROGRESS ─────────────────────────────────────────────────────
+let progressState = {};
+function initProgress(){
+  progressState={done:[],active:null,failed:[]};
+  renderProgress(0,'Inizializzazione...');
+  const wrap=$('progressSteps');
+  wrap.innerHTML=STEPS.map((s,i)=>`<span class="step-dot" id="sdot-${i}">${s}</span>`).join('');
+}
+function setStep(idx,state){
+  STEPS.forEach((_,i)=>{
+    const d=$(`sdot-${i}`);
+    if(!d)return;
+    d.className='step-dot'+(i<idx?' done':i===idx?' '+state:'');
+  });
+}
+function renderProgress(pct,label){
+  $('progressFill').style.width=pct+'%';
+  $('progressPct').textContent=pct+'%';
+  $('progressLabel').textContent=label;
+}
+
+// ─── CAMERA ───────────────────────────────────────────────────────
+async function startWebcam(){
+  try{
+    camStream=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
+    const v=$('videoEl');v.srcObject=camStream;
+    $('camBadge').textContent='\u25CF Cam live';
+    $('camBadge').className='pill live';
+    $('startBtn').disabled=true;$('stopBtn').disabled=false;
+    bLog('Webcam avviata','ok');
+    connectWS();
+  }catch(e){
+    bLog('Errore webcam: '+e.message,'er');
   }
+}
 
-  function setStatus(live) {
-    const b = document.getElementById('statusBadge');
-    b.textContent = live ? '\u25CF Live' : '\u25CF Offline';
-    b.className = 'badge ' + (live ? 'live' : 'offline');
+function connectWS(){
+  ws=new WebSocket(`ws://${location.host}/ws/stream`);
+  ws.onopen=()=>{
+    $('wsBadge').textContent='\u25CF WS live';
+    $('wsBadge').className='pill live';
+    bLog('WebSocket connesso','ok');
+    sendFrameLoop();
+  };
+  ws.onmessage=handleWsMsg;
+  ws.onerror=()=>bLog('Errore WebSocket','er');
+  ws.onclose=()=>{
+    $('wsBadge').textContent='\u25CF WS off';
+    $('wsBadge').className='pill off';
+  };
+}
+
+function sendFrameLoop(){
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const off=document.createElement('canvas');
+  off.width=640;off.height=360;
+  off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
+  ws.send(JSON.stringify({frame:off.toDataURL('image/jpeg',.7)}));
+  const ov=$('overlayCanvas');
+  ov.width=$('videoEl').offsetWidth;ov.height=$('videoEl').offsetHeight;
+  frameCount++;
+  const now=Date.now();
+  if(now-lastFpsTime>=1000){
+    $('fpsBadge').textContent=frameCount+' FPS';
+    frameCount=0;lastFpsTime=now;
   }
+  setTimeout(sendFrameLoop,80);
+}
 
-  function setPdfStatus(msg, type) {
-    const el = document.getElementById('pdfStatus');
-    el.textContent = msg;
-    el.className = 'pdf-status ' + type;
-  }
+function handleWsMsg(ev){
+  const d=JSON.parse(ev.data);
+  if(d.error){bLog(d.error,'er');return;}
+  const v=$('videoEl');
+  drawOverlay(d.faces,v.videoWidth||640,v.videoHeight||360);
+  updateFaceStrip(d.faces);
+}
 
-  async function generatePdfReport() {
-    const name = document.getElementById('pdfName').value.trim();
-    const fileInput = document.getElementById('pdfFile');
-    const runMaigret = document.getElementById('pdfMaigret').checked;
+function drawOverlay(faces,sw,sh){
+  const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const sx=cv.width/(sw||640),sy=cv.height/(sh||360);
+  faces.forEach(f=>{
+    const x=f.left*sx,y=f.top*sy,w=(f.right-f.left)*sx,h=(f.bottom-f.top)*sy;
+    ctx.strokeStyle=f.matched?'#00e5c4':'#f87171';
+    ctx.lineWidth=2;
+    ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle=f.matched?'rgba(0,229,196,.85)':'rgba(248,113,113,.85)';
+    ctx.fillRect(x,y-22,w,22);
+    ctx.fillStyle='#0a0c10';ctx.font='bold 12px Inter,sans-serif';
+    ctx.fillText(f.matched?`${f.name} ${Math.round(f.confidence*100)}%`:'?',x+4,y-6);
+  });
+}
 
-    if (!name) { setPdfStatus('Inserisci il nome del target.', 'error'); return; }
-    if (!fileInput.files.length) { setPdfStatus('Seleziona un\'immagine del volto.', 'error'); return; }
+function updateFaceStrip(faces){
+  const el=$('faceStrip');
+  if(!faces.length){el.innerHTML='<span style="color:var(--mu);font-size:.72rem">Nessun volto rilevato</span>';return;}
+  el.innerHTML=faces.map(f=>
+    `<span class="face-tag ${f.matched?'':'unk'}">${f.matched?f.name+' '+Math.round(f.confidence*100)+'%':'Sconosciuto'}</span>`
+  ).join('');
+}
 
-    const btn = document.getElementById('pdfBtn');
-    btn.disabled = true;
-    setPdfStatus('Generazione in corso... attendere.', 'loading');
-    log('Avvio generazione PDF per: ' + name, 'pdf');
+function startRTSP(){
+  const url=$('rtspUrl').value.trim();if(!url)return;
+  ws=new WebSocket(`ws://${location.host}/ws/rtsp?url=${encodeURIComponent(url)}`);
+  ws.onopen=()=>{$('wsBadge').textContent='\u25CF RTSP';$('wsBadge').className='pill live';bLog('RTSP connesso','ok');$('stopBtn').disabled=false;};
+  ws.onmessage=ev=>{
+    const d=JSON.parse(ev.data);
+    if(d.error){bLog(d.error,'er');return;}
+    const img=new Image();
+    const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
+    img.onload=()=>{cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.drawImage(img,0,0,cv.width,cv.height);drawOverlay(d.faces,img.width,img.height);};
+    img.src=d.frame;updateFaceStrip(d.faces);
+  };
+  ws.onerror=()=>bLog('Errore RTSP','er');
+}
 
-    try {
-      const form = new FormData();
-      form.append('name', name);
-      form.append('file', fileInput.files[0]);
-      form.append('run_maigret', runMaigret ? 'true' : 'false');
+function stopStream(){
+  if(ws){ws.close();ws=null;}
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  $('camBadge').textContent='\u25CF Cam off';$('camBadge').className='pill off';
+  $('startBtn').disabled=false;$('stopBtn').disabled=true;
+  $('overlayCanvas').getContext('2d').clearRect(0,0,9999,9999);
+  $('fpsBadge').textContent='0 FPS';
+  bLog('Stream fermato');
+}
 
-      const res = await fetch('/report/pdf', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + token() },
-        body: form,
-      });
+async function captureAndRegister(){
+  const name=prompt('Nome da associare al volto:');if(!name)return;
+  const off=document.createElement('canvas');off.width=640;off.height=360;
+  off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
+  const blob=await new Promise(r=>off.toBlob(r,'image/jpeg',.9));
+  const form=new FormData();form.append('file',blob,'cap.jpg');
+  const res=await API(`/register?name=${encodeURIComponent(name)}`,{method:'POST',body:form});
+  const d=await res.json();
+  if(res.ok){bLog('Registrato: '+d.name+' (ID '+d.id+')','ok');loadKnown();}
+  else bLog('Errore registrazione: '+(d.detail||res.status),'er');
+}
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.status }));
-        throw new Error(err.detail || res.status);
-      }
+function captureForOsint(){
+  if(!camStream){bLog('Avvia la webcam prima','er');return;}
+  const off=document.createElement('canvas');off.width=640;off.height=360;
+  off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
+  off.toBlob(b=>{capturedImageBlob=b;bLog('Frame catturato per OSINT','ok');},'image/jpeg',.9);
+}
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `osint_report_${name.replace(/\s+/g, '_').toLowerCase()}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+function handleFileSelect(){
+  const f=$('targetFile').files[0];
+  if(f){capturedImageBlob=f;bLog('Immagine selezionata: '+f.name,'info');}
+}
 
-      setPdfStatus('PDF scaricato con successo!', 'success');
-      log('PDF generato e scaricato: ' + a.download, 'pdf');
-    } catch (e) {
-      setPdfStatus('Errore: ' + e.message, 'error');
-      log('Errore PDF: ' + e.message, 'error');
-    } finally {
-      btn.disabled = false;
+async function loadKnown(){
+  const res=await API('/known');
+  if(!res.ok)return;
+  const data=await res.json();
+  bLog('Volti noti: '+data.length,'info');
+}
+
+// ─── OSINT PIPELINE ───────────────────────────────────────────────
+async function runOsintFull(){
+  const name=$('targetName').value.trim();
+  if(!name){bLog('Inserisci un nome target','er');addReason('Nome target mancante','warn');return;}
+  const imgBlob=capturedImageBlob;
+  if(!imgBlob){bLog('Nessuna immagine — usa "Foto" o "Usa cam"','er');addReason('Immagine mancante','warn');return;}
+
+  $('pdfName').value=name;
+  switchTab('reasoning');
+  $('reasonLog').innerHTML='';
+  initProgress();
+
+  addReason(`Avvio analisi OSINT per target: <strong>${name}</strong>`,'step');
+
+  // Stima tempo: senza Maigret ~10-15s
+  const TOTAL_STEPS=6;
+  let currentStep=0;
+
+  const advance=(label,type='step')=>{
+    currentStep++;
+    const pct=Math.round((currentStep/TOTAL_STEPS)*100);
+    setStep(currentStep-1,'done');
+    setStep(currentStep,'active');
+    renderProgress(pct,label);
+    addReason(label,type);
+  };
+
+  advance('Calcolo hash immagine...');
+  await sleep(200);
+
+  advance('Reverse image search (Google Lens, Yandex, TinEye)...');
+
+  try{
+    // /osint/image
+    const formImg=new FormData();
+    formImg.append('file',imgBlob,'target.jpg');
+    const rImg=await API('/osint/image',{method:'POST',body:formImg});
+    const dImg=await rImg.json();
+    if(!rImg.ok) throw new Error(dImg.detail||rImg.status);
+    const cached=dImg.from_cache;
+    addReason(`Reverse image completato — ${dImg.faces_detected??'?'} volti rilevati${cached?' (da cache)':''}`,dImg.faces_detected>0?'found':'step');
+    // Aggiungi evidenze reverse image
+    const sources=dImg.sources||{};
+    Object.entries(sources).forEach(([src,v])=>{
+      (v.results||[]).forEach(r=>addEvidence(src,'reverse_image',r.url,r.title||src,.6));
+    });
+
+    advance('Ricerca social per nome...');
+    const rSoc=await API('/osint/social',{method:'POST',headers:{'Authorization':'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({name,run_maigret:false})});
+    const dSoc=await rSoc.json();
+    if(rSoc.ok){
+      const found=(dSoc.by_name||[]).filter(p=>p.found);
+      addReason(`Social lookup: ${found.length} profili trovati su ${(dSoc.by_name||[]).length} piattaforme`,found.length>0?'found':'step');
+      found.forEach(p=>addEvidence('social','profile',p.url||'',p.platform,.75));
     }
-  }
 
-  async function startWebcam() {
-    streamMode = 'webcam';
-    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
-    video.srcObject = stream;
-    video.style.display = 'block';
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('stopBtn').disabled = false;
-    const wsUrl = `ws://localhost:8000/ws/stream`;
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => { setStatus(true); log('WebSocket webcam connesso', 'match'); sendFrameLoop(); };
-    ws.onmessage = handleMessage;
-    ws.onerror = (e) => log('Errore WebSocket: ' + e, 'error');
-    ws.onclose = () => { setStatus(false); log('WebSocket disconnesso'); };
-  }
+    advance('Pipeline OSINT completa + risk score...');
+    const formFull=new FormData();
+    formFull.append('file',imgBlob,'target.jpg');
+    formFull.append('name',name);
+    formFull.append('run_maigret','false');
+    const rFull=await API('/osint/full',{method:'POST',body:formFull});
+    const dFull=await rFull.json();
+    if(!rFull.ok) throw new Error(dFull.detail||rFull.status);
 
-  function startRTSP() {
-    const url = document.getElementById('rtspUrl').value.trim();
-    if (!url) return;
-    streamMode = 'rtsp';
-    video.srcObject = null;
-    video.style.display = 'none';
-    const wsUrl = `ws://localhost:8000/ws/rtsp?url=${encodeURIComponent(url)}`;
-    ws = new WebSocket(wsUrl);
-    ws.onopen = () => { setStatus(true); log('Connesso a stream RTSP: ' + url, 'match'); document.getElementById('stopBtn').disabled = false; };
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.error) { log(data.error, 'error'); return; }
-      const img = new Image();
-      img.onload = () => {
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        drawOverlay(data.faces, img.width, img.height);
-      };
-      img.src = data.frame;
-      updateStats(data.faces);
-    };
-    ws.onerror = (e) => log('Errore RTSP: ' + e, 'error');
-    ws.onclose = () => { setStatus(false); log('Stream RTSP disconnesso'); };
-  }
+    const risk=dFull.risk_score??0;
+    addReason(`Risk score calcolato: <strong>${Math.round(risk*100)}%</strong>`,risk>.5?'warn':'found');
+    updateRiskGauge(risk);
+    osintRunId=dFull.run_id||null;
 
-  function sendFrameLoop() {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = 640; offscreen.height = 360;
-    const c = offscreen.getContext('2d');
-    c.drawImage(video, 0, 0, 640, 360);
-    const frame = offscreen.toDataURL('image/jpeg', 0.7);
-    ws.send(JSON.stringify({ frame }));
-    canvas.width = video.offsetWidth;
-    canvas.height = video.offsetHeight;
-    frameCount++;
-    const now = Date.now();
-    if (now - lastFrameTime >= 1000) {
-      document.getElementById('fpsBadge').textContent = frameCount + ' FPS';
-      frameCount = 0; lastFrameTime = now;
+    // Stat cards
+    $('statEvidence').textContent=(dFull.evidence||[]).length||'—';
+    (dFull.evidence||[]).forEach(e=>addEvidence(e.source,e.kind,e.url,e.url,e.confidence??0));
+
+    advance('Costruzione grafo relazioni...');
+    if(osintRunId){
+      buildGraphFromData(dFull,name);
+      addReason('Grafo costruito — apri tab Grafo per visualizzarlo','found');
     }
-    setTimeout(sendFrameLoop, 80);
-  }
 
-  function handleMessage(event) {
-    const data = JSON.parse(event.data);
-    if (data.error) { log(data.error, 'error'); return; }
-    drawOverlay(data.faces, video.videoWidth, video.videoHeight);
-    updateStats(data.faces);
-  }
+    advance('Analisi completata','found');
+    renderProgress(100,'Completato &#10003;');
+    STEPS.forEach((_,i)=>setStep(i,'done'));
+    bLog('OSINT completato per: '+name,'ok');
+    loadStats();
 
-  function drawOverlay(faces, srcW, srcH) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const scaleX = canvas.width / (srcW || 640);
-    const scaleY = canvas.height / (srcH || 360);
-    faces.forEach(f => {
-      const x = f.left * scaleX, y = f.top * scaleY;
-      const w = (f.right - f.left) * scaleX, h = (f.bottom - f.top) * scaleY;
-      ctx.strokeStyle = f.matched ? '#64ffda' : '#f87171';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = f.matched ? 'rgba(100,255,218,0.85)' : 'rgba(248,113,113,0.85)';
-      ctx.fillRect(x, y - 22, w, 22);
-      ctx.fillStyle = '#0f1117';
-      ctx.font = 'bold 13px Inter, sans-serif';
-      const label = f.matched ? `${f.name} ${Math.round(f.confidence * 100)}%` : 'Sconosciuto';
-      ctx.fillText(label, x + 4, y - 6);
+  }catch(e){
+    addReason('Errore: '+e.message,'err');
+    bLog('Errore OSINT: '+e.message,'er');
+    renderProgress($('progressFill').style.width.replace('%','')||0,'Errore');
+  }
+}
+
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+// ─── EVIDENCE TABLE ───────────────────────────────────────────────
+function addEvidence(src,kind,url,label,conf){
+  const tb=$('evidenceTable');
+  if(tb.querySelector('[colspan]'))tb.innerHTML='';
+  const conf100=Math.round((conf||0)*100);
+  const srcClass=src.replace(/[^a-z0-9]/g,'_').toLowerCase();
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td><span class="badge-src ${srcClass}">${src}</span></td>
+    <td style="color:var(--mu);font-size:.72rem">${kind||''}</td>
+    <td>${url?`<a class="ext-link" href="${url}" target="_blank">${(label||url).slice(0,40)}</a>`:label||'—'}</td>
+    <td><span class="conf-bar" style="width:${conf100}px;max-width:60px"></span> <span style="font-size:.7rem;color:var(--mu)">${conf100}%</span></td>
+  `;
+  tb.appendChild(tr);
+}
+
+// ─── GRAPH ────────────────────────────────────────────────────────
+let graphData=null;
+function buildGraphFromData(data,name){
+  const nodes=[];
+  const edges=[];
+  const personId='person:'+name;
+  nodes.push({id:personId,label:name,type:'person'});
+  (data.reverse_image?.sources||{})&&Object.entries(data.reverse_image?.sources||{}).forEach(([src,v])=>{
+    const sid='site:'+src;
+    if(!nodes.find(n=>n.id===sid))nodes.push({id:sid,label:src,type:'site'});
+    edges.push({source:personId,target:sid,label:'reverse_image'});
+    (v.results||[]).forEach(r=>{
+      if(!r.url)return;
+      const aid='account:'+r.url.slice(0,40);
+      if(!nodes.find(n=>n.id===aid))nodes.push({id:aid,label:r.title||r.url.slice(0,30),type:'account'});
+      edges.push({source:sid,target:aid,label:'result'});
     });
-  }
+  });
+  (data.evidence||[]).forEach(e=>{
+    if(!e.url)return;
+    const aid='ev:'+e.source+':'+e.url.slice(0,30);
+    if(!nodes.find(n=>n.id===aid))nodes.push({id:aid,label:e.source,type:e.kind==='profile'?'account':'site'});
+    edges.push({source:personId,target:aid,label:e.kind||'evidence'});
+  });
+  graphData={nodes,edges,node_count:nodes.length,edge_count:edges.length};
+  renderGraph();
+  $('statSources').textContent=nodes.filter(n=>n.type==='site'||n.type==='account').length;
+}
 
-  function updateStats(faces) {
-    document.getElementById('faceCount').textContent = faces.length;
-    const matches = faces.filter(f => f.matched);
-    document.getElementById('matchCount').textContent = matches.length;
-    const list = document.getElementById('faceList');
-    list.innerHTML = faces.map(f =>
-      `<div class="face-item ${f.matched ? '' : 'unknown'}">
-        <span class="name">${f.matched ? f.name : 'Sconosciuto'}</span>
-        <span class="conf">${f.matched ? Math.round(f.confidence * 100) + '%' : ''}</span>
-      </div>`
-    ).join('');
-    matches.forEach(f => {
-      totalMatches++;
-      if (totalMatches <= 200) log(`Match: ${f.name} (${Math.round(f.confidence * 100)}%)`, 'match');
-    });
-  }
+async function loadGraph(runId){
+  try{
+    const r=await API('/osint/graph/'+runId);
+    if(!r.ok)return;
+    graphData=await r.json();
+    renderGraph();
+  }catch{}
+}
 
-  function stopStream() {
-    if (ws) { ws.close(); ws = null; }
-    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-    setStatus(false);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('stopBtn').disabled = true;
-    document.getElementById('faceCount').textContent = '0';
-    document.getElementById('matchCount').textContent = '0';
-    log('Stream fermato');
-  }
+function renderGraph(){
+  if(!graphData)return;
+  const cv=$('graphCanvas');
+  const rect=cv.parentElement.getBoundingClientRect();
+  cv.width=rect.width||500;cv.height=320;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const {nodes,edges}=graphData;
+  const colors={person:'#00e5c4',account:'#60a5fa',site:'#fb923c',maigret:'#7c3aed'};
+  const pos={};
+  const cx=cv.width/2,cy=cv.height/2;
+  nodes.forEach((n,i)=>{
+    if(i===0){pos[n.id]={x:cx,y:cy};return;}
+    const angle=(2*Math.PI/Math.max(1,nodes.length-1))*(i-1);
+    const r=Math.min(cx,cy)*.72;
+    pos[n.id]={x:cx+r*Math.cos(angle),y:cy+r*Math.sin(angle)};
+  });
+  // Edges
+  ctx.strokeStyle='rgba(255,255,255,.1)';
+  ctx.lineWidth=1;
+  edges.forEach(e=>{
+    const a=pos[e.source],b=pos[e.target];
+    if(!a||!b)return;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  });
+  // Nodes
+  nodes.forEach(n=>{
+    const p=pos[n.id];if(!p)return;
+    const r=n.type==='person'?14:9;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,r,0,2*Math.PI);
+    ctx.fillStyle=colors[n.type]||'#566070';
+    ctx.fill();
+    ctx.fillStyle='rgba(10,12,16,.7)';
+    ctx.font=(n.type==='person'?'bold ':'')+'10px Inter,sans-serif';
+    ctx.textAlign='center';
+    const lbl=(n.label||'').slice(0,18);
+    ctx.fillText(lbl,p.x,p.y+r+11);
+    ctx.fillStyle=colors[n.type]||'#566070';
+    ctx.fillText(lbl,p.x,p.y+r+10);
+  });
+}
 
-  async function captureAndRegister() {
-    const name = prompt('Nome da associare al volto:');
-    if (!name) return;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = 640; offscreen.height = 360;
-    offscreen.getContext('2d').drawImage(video, 0, 0, 640, 360);
-    const blob = await new Promise(r => offscreen.toBlob(r, 'image/jpeg', 0.9));
-    const form = new FormData();
-    form.append('file', blob, 'capture.jpg');
-    form.append('name', name);
-    const res = await fetch(`/register?name=${encodeURIComponent(name)}`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token() },
-      body: form,
-    });
-    const data = await res.json();
-    if (res.ok) { log(`Registrato: ${data.name} (ID ${data.id})`, 'match'); loadKnown(); }
-    else log('Errore registrazione: ' + (data.detail || res.status), 'error');
-  }
+// ─── STATS ────────────────────────────────────────────────────────
+async function loadStats(){
+  try{
+    const r=await API('/osint/stats');
+    if(!r.ok)return;
+    const d=await r.json();
+    $('statTotal').textContent=d.total_runs??'—';
+    $('statAvgRisk').textContent=d.avg_risk_score!=null?Math.round(d.avg_risk_score*100)+'%':'—';
+    const evCount=Object.values(d.evidence_by_source||{}).reduce((a,b)=>a+b,0);
+    $('statEvidence').textContent=evCount||'—';
+    $('statSources').textContent=Object.keys(d.evidence_by_source||{}).length||'—';
+  }catch{}
+}
 
-  async function loadKnown() {
-    const res = await fetch('/known', { headers: { 'Authorization': 'Bearer ' + token() } });
-    if (!res.ok) { log('Errore caricamento volti noti', 'error'); return; }
-    const data = await res.json();
-    const list = document.getElementById('knownList');
-    if (!data.length) { list.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Nessun volto registrato</span>'; return; }
-    list.innerHTML = data.map(f =>
-      `<div class="known-item">
-        <span>${f.name}</span>
-        <button class="del-btn" onclick="deleteKnown(${f.id})">&#10005;</button>
-      </div>`
-    ).join('');
-  }
+function updateRiskGauge(score){
+  const pct=Math.round(score*100);
+  const fill=$('riskFill');
+  fill.style.width=pct+'%';
+  fill.style.background=pct>66?'#f87171':pct>33?'#fb923c':'#4ade80';
+  $('riskPct').textContent=pct+'%';
+}
 
-  async function deleteKnown(id) {
-    const res = await fetch(`/known/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + token() },
-    });
-    if (res.ok) { log(`Volto ID ${id} eliminato`); loadKnown(); }
-    else log('Errore eliminazione', 'error');
+// ─── PDF ──────────────────────────────────────────────────────────
+async function generatePdf(){
+  const name=$('pdfName').value.trim();
+  const fileInput=$('pdfFile');
+  const runMaigret=$('pdfMaigret').checked;
+  if(!name){setPdfStatus('Inserisci il nome target.','error');return;}
+  if(!fileInput.files.length&&!capturedImageBlob){setPdfStatus('Seleziona un immagine.','error');return;}
+  const imgBlob=fileInput.files.length?fileInput.files[0]:capturedImageBlob;
+  setPdfStatus('Generazione PDF in corso...','loading');
+  try{
+    const form=new FormData();
+    form.append('name',name);
+    form.append('file',imgBlob,'target.jpg');
+    form.append('run_maigret',runMaigret?'true':'false');
+    const res=await API('/report/pdf',{method:'POST',body:form});
+    if(!res.ok)throw new Error((await res.json()).detail||res.status);
+    const blob=await res.blob();
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`osint_${name.replace(/\s+/g,'_').toLowerCase()}.pdf`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    setPdfStatus('PDF scaricato!','success');
+    bLog('PDF generato: '+a.download,'ok');
+  }catch(e){
+    setPdfStatus('Errore: '+e.message,'error');
+    bLog('Errore PDF: '+e.message,'er');
   }
+}
 
-  loadKnown();
-  log('Dashboard caricata. Avvia la webcam o genera un Report PDF OSINT.');
+function setPdfStatus(msg,cls){
+  const el=$('pdfStatus');el.textContent=msg;el.className='pdf-status '+cls;
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────
+initProgress();
+bLog('Dashboard v2 caricata — inserisci nome target + immagine, premi Analizza','info');
 </script>
 </body>
 </html>
