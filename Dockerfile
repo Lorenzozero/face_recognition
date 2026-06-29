@@ -1,52 +1,44 @@
-# This is a sample Dockerfile you can modify to deploy your own app based on face_recognition
+# face_recognition-ng — InsightFace + FastAPI
+# NON usa dlib. NON usa setup.py install.
 
-FROM python:3.10.3-slim-bullseye
+FROM python:3.10-slim-bullseye
 
-RUN apt-get -y update
-RUN apt-get install -y --fix-missing \
+# Dipendenze di sistema per OpenCV e InsightFace
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    gfortran \
-    git \
+    libglib2.0-0 \
+    libgl1-mesa-glx \
+    libgomp1 \
     wget \
     curl \
-    graphicsmagick \
-    libgraphicsmagick1-dev \
-    libatlas-base-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libgtk2.0-dev \
-    libjpeg-dev \
-    liblapack-dev \
-    libswscale-dev \
-    pkg-config \
-    python3-dev \
-    python3-numpy \
-    software-properties-common \
-    zip \
-    && apt-get clean && rm -rf /tmp/* /var/tmp/*
+    git \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN cd ~ && \
-    mkdir -p dlib && \
-    git clone -b 'v19.9' --single-branch https://github.com/davisking/dlib.git dlib/ && \
-    cd  dlib/ && \
-    python3 setup.py install --yes USE_AVX_INSTRUCTIONS
+WORKDIR /app
 
+# Copia requirements e installa PRIMA (layer cache)
+COPY requirements_ng.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements_ng.txt
 
-# The rest of this file just runs an example script.
+# Copia tutto il progetto
+COPY . .
 
-# If you wanted to use this Dockerfile to run your own app instead, maybe you would do this:
-# COPY . /root/your_app_or_whatever
-# RUN cd /root/your_app_or_whatever && \
-#     pip3 install -r requirements.txt
-# RUN whatever_command_you_run_to_start_your_app
+# Installa il package face_recognition locale (con backends/)
+RUN pip install --no-cache-dir -e .
 
-COPY . /root/face_recognition
-RUN cd /root/face_recognition && \
-    pip3 install -r requirements.txt && \
-    python3 setup.py install
+# Porta default FastAPI
+EXPOSE 8000
 
-# Add pip3 install opencv-python==4.1.2.30 if you want to run the live webcam examples
+# Variabili ENV di default (override con -e al run)
+ENV FR_API_TOKEN=changeme \
+    FR_DB_PATH=/app/data/faces.db \
+    FR_OSINT_DB_PATH=/app/data/osint_results.db \
+    OSINT_ENABLE_EXTERNAL=true \
+    RATE_LIMIT_ENABLED=true
 
-CMD cd /root/face_recognition/examples && \
-    python3 recognize_faces_in_pictures.py
+# Crea cartella dati
+RUN mkdir -p /app/data
+
+CMD ["python", "api_server.py"]
