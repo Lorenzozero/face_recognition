@@ -336,7 +336,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
       <!-- Target bar -->
       <div class="target-bar">
         <input class="inp" id="targetName" placeholder="Nome target (es. Mario Rossi)">
-        <input type="file" id="targetFile" accept="image/*" style="display:none" onchange="handleFileSelect()">
+        <input type="file" id="targetFile" accept="image/*,.heic,.heif" style="display:none" onchange="handleFileSelect()">
         <button class="btn btn-sm" onclick="document.getElementById('targetFile').click()">&#128247; Foto</button>
         <button class="btn btn-primary btn-sm" onclick="runOsintFull()">&#9654; Analizza</button>
         <button class="btn btn-sm" style="border-color:var(--or);color:var(--or)" onclick="captureForOsint()">&#128249; Usa cam</button>
@@ -422,7 +422,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
             <label>Nome target (pre-compilato dal campo OSINT)</label>
             <input class="inp" id="pdfName" placeholder="Mario Rossi">
             <label>Immagine volto</label>
-            <input type="file" id="pdfFile" accept="image/*" style="margin-top:.2rem">
+            <input type="file" id="pdfFile" accept="image/*,.heic,.heif" style="margin-top:.2rem">
             <div style="display:flex;align-items:center;gap:.5rem;margin-top:.1rem">
               <input type="checkbox" id="pdfMaigret" style="accent-color:var(--ac)">
               <label for="pdfMaigret" style="cursor:pointer">Includi Maigret (~60s)</label>
@@ -454,7 +454,47 @@ const STEPS = ['Hashing','Reverse Image','Social Lookup','Maigret','Risk Score',
 const $  = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString();
 const token = () => $('tokenInput').value.trim() || 'changeme';
-const API  = (p,o={}) => fetch(p,{headers:{'Authorization':'Bearer '+token()},...o});
+
+// Safe fetch: legge sempre come testo, parsa JSON solo se Content-Type lo indica
+async function safeJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  const text = await res.text();
+  if (ct.includes('application/json')) {
+    try { return JSON.parse(text); }
+    catch(e) { throw new Error('Risposta non valida dal server: ' + text.slice(0,120)); }
+  }
+  // Server ha risposto con HTML/testo (es. 500 Internal Server Error)
+  if (!res.ok) throw new Error(`Server error ${res.status}: ${text.slice(0,120)}`);
+  try { return JSON.parse(text); } catch { return { _raw: text }; }
+}
+
+const API = (p, o={}) => fetch(p, {headers:{'Authorization':'Bearer '+token()}, ...o});
+
+// Converte qualsiasi File (incluso HEIC) in Blob JPEG tramite canvas
+async function toJpegBlob(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(url);
+        if (blob) resolve(blob);
+        else reject(new Error('Conversione immagine fallita'));
+      }, 'image/jpeg', 0.92);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // HEIC non supportato dal browser — fallback: usa il file originale
+      bLog('Browser non supporta HEIC nativo, invio file originale', 'info');
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
 
 function bLog(msg,cls=''){
   const el=$('bottomLog'),d=document.createElement('div');
@@ -503,6 +543,11 @@ function renderProgress(pct,label){
 
 // ─── CAMERA ───────────────────────────────────────────────────────
 async function startWebcam(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    bLog('Webcam non disponibile — questa funzione richiede accesso locale al browser (non funziona su Railway/cloud)','er');
+    addReason('Webcam non disponibile su server remoto. Usa il pulsante 📸 Foto per caricare un’immagine.','warn');
+    return;
+  }
   try{
     camStream=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
     const v=$('videoEl');v.srcObject=camStream;
@@ -512,12 +557,19 @@ async function startWebcam(){
     bLog('Webcam avviata','ok');
     connectWS();
   }catch(e){
-    bLog('Errore webcam: '+e.message,'er');
+    const msg = e.name==='NotFoundError'
+      ? 'Nessuna webcam trovata — usa il pulsante 📸 Foto per caricare un’immagine'
+      : e.name==='NotAllowedError'
+      ? 'Permesso webcam negato dal browser'
+      : 'Errore webcam: '+e.message;
+    bLog(msg,'er');
+    addReason(msg,'warn');
   }
 }
 
 function connectWS(){
-  ws=new WebSocket(`ws://${location.host}/ws/stream`);
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}/ws/stream`);
   ws.onopen=()=>{
     $('wsBadge').textContent='\u25CF WS live';
     $('wsBadge').className='pill live';
@@ -550,11 +602,13 @@ function sendFrameLoop(){
 }
 
 function handleWsMsg(ev){
-  const d=JSON.parse(ev.data);
-  if(d.error){bLog(d.error,'er');return;}
-  const v=$('videoEl');
-  drawOverlay(d.faces,v.videoWidth||640,v.videoHeight||360);
-  updateFaceStrip(d.faces);
+  try{
+    const d=JSON.parse(ev.data);
+    if(d.error){bLog(d.error,'er');return;}
+    const v=$('videoEl');
+    drawOverlay(d.faces||[],v.videoWidth||640,v.videoHeight||360);
+    updateFaceStrip(d.faces||[]);
+  }catch{}
 }
 
 function drawOverlay(faces,sw,sh){
@@ -583,15 +637,18 @@ function updateFaceStrip(faces){
 
 function startRTSP(){
   const url=$('rtspUrl').value.trim();if(!url)return;
-  ws=new WebSocket(`ws://${location.host}/ws/rtsp?url=${encodeURIComponent(url)}`);
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}/ws/rtsp?url=${encodeURIComponent(url)}`);
   ws.onopen=()=>{$('wsBadge').textContent='\u25CF RTSP';$('wsBadge').className='pill live';bLog('RTSP connesso','ok');$('stopBtn').disabled=false;};
   ws.onmessage=ev=>{
-    const d=JSON.parse(ev.data);
-    if(d.error){bLog(d.error,'er');return;}
-    const img=new Image();
-    const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
-    img.onload=()=>{cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.drawImage(img,0,0,cv.width,cv.height);drawOverlay(d.faces,img.width,img.height);};
-    img.src=d.frame;updateFaceStrip(d.faces);
+    try{
+      const d=JSON.parse(ev.data);
+      if(d.error){bLog(d.error,'er');return;}
+      const img=new Image();
+      const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
+      img.onload=()=>{cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.drawImage(img,0,0,cv.width,cv.height);drawOverlay(d.faces||[],img.width,img.height);};
+      img.src=d.frame;updateFaceStrip(d.faces||[]);
+    }catch{}
   };
   ws.onerror=()=>bLog('Errore RTSP','er');
 }
@@ -613,7 +670,7 @@ async function captureAndRegister(){
   const blob=await new Promise(r=>off.toBlob(r,'image/jpeg',.9));
   const form=new FormData();form.append('file',blob,'cap.jpg');
   const res=await API(`/register?name=${encodeURIComponent(name)}`,{method:'POST',body:form});
-  const d=await res.json();
+  const d=await safeJson(res);
   if(res.ok){bLog('Registrato: '+d.name+' (ID '+d.id+')','ok');loadKnown();}
   else bLog('Errore registrazione: '+(d.detail||res.status),'er');
 }
@@ -625,15 +682,19 @@ function captureForOsint(){
   off.toBlob(b=>{capturedImageBlob=b;bLog('Frame catturato per OSINT','ok');},'image/jpeg',.9);
 }
 
-function handleFileSelect(){
+async function handleFileSelect(){
   const f=$('targetFile').files[0];
-  if(f){capturedImageBlob=f;bLog('Immagine selezionata: '+f.name,'info');}
+  if(!f) return;
+  bLog('Immagine selezionata: '+f.name+' — conversione in corso...','info');
+  // Converti sempre in JPEG (gestisce HEIC, PNG, WebP, ecc.)
+  capturedImageBlob = await toJpegBlob(f);
+  bLog('Immagine pronta ('+Math.round(capturedImageBlob.size/1024)+'KB)','ok');
 }
 
 async function loadKnown(){
   const res=await API('/known');
   if(!res.ok)return;
-  const data=await res.json();
+  const data=await safeJson(res);
   bLog('Volti noti: '+data.length,'info');
 }
 
@@ -651,7 +712,6 @@ async function runOsintFull(){
 
   addReason(`Avvio analisi OSINT per target: <strong>${name}</strong>`,'step');
 
-  // Stima tempo: senza Maigret ~10-15s
   const TOTAL_STEPS=6;
   let currentStep=0;
 
@@ -670,15 +730,13 @@ async function runOsintFull(){
   advance('Reverse image search (Google Lens, Yandex, TinEye)...');
 
   try{
-    // /osint/image
     const formImg=new FormData();
     formImg.append('file',imgBlob,'target.jpg');
     const rImg=await API('/osint/image',{method:'POST',body:formImg});
-    const dImg=await rImg.json();
-    if(!rImg.ok) throw new Error(dImg.detail||rImg.status);
+    const dImg=await safeJson(rImg);
+    if(!rImg.ok) throw new Error(dImg.detail||dImg._raw||rImg.status);
     const cached=dImg.from_cache;
     addReason(`Reverse image completato — ${dImg.faces_detected??'?'} volti rilevati${cached?' (da cache)':''}`,dImg.faces_detected>0?'found':'step');
-    // Aggiungi evidenze reverse image
     const sources=dImg.sources||{};
     Object.entries(sources).forEach(([src,v])=>{
       (v.results||[]).forEach(r=>addEvidence(src,'reverse_image',r.url,r.title||src,.6));
@@ -686,10 +744,10 @@ async function runOsintFull(){
 
     advance('Ricerca social per nome...');
     const rSoc=await API('/osint/social',{method:'POST',headers:{'Authorization':'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({name,run_maigret:false})});
-    const dSoc=await rSoc.json();
+    const dSoc=await safeJson(rSoc);
     if(rSoc.ok){
-      const found=(dSoc.by_name||[]).filter(p=>p.found);
-      addReason(`Social lookup: ${found.length} profili trovati su ${(dSoc.by_name||[]).length} piattaforme`,found.length>0?'found':'step');
+      const found=(dSoc.by_name?.platforms||[]).filter(p=>p.found);
+      addReason(`Social lookup: ${found.length} profili trovati`,found.length>0?'found':'step');
       found.forEach(p=>addEvidence('social','profile',p.url||'',p.platform,.75));
     }
 
@@ -699,26 +757,23 @@ async function runOsintFull(){
     formFull.append('name',name);
     formFull.append('run_maigret','false');
     const rFull=await API('/osint/full',{method:'POST',body:formFull});
-    const dFull=await rFull.json();
-    if(!rFull.ok) throw new Error(dFull.detail||rFull.status);
+    const dFull=await safeJson(rFull);
+    if(!rFull.ok) throw new Error(dFull.detail||dFull._raw||rFull.status);
 
     const risk=dFull.risk_score??0;
     addReason(`Risk score calcolato: <strong>${Math.round(risk*100)}%</strong>`,risk>.5?'warn':'found');
     updateRiskGauge(risk);
     osintRunId=dFull.run_id||null;
 
-    // Stat cards
     $('statEvidence').textContent=(dFull.evidence||[]).length||'—';
     (dFull.evidence||[]).forEach(e=>addEvidence(e.source,e.kind,e.url,e.url,e.confidence??0));
 
     advance('Costruzione grafo relazioni...');
-    if(osintRunId){
-      buildGraphFromData(dFull,name);
-      addReason('Grafo costruito — apri tab Grafo per visualizzarlo','found');
-    }
+    buildGraphFromData(dFull,name);
+    if(osintRunId) addReason('Grafo costruito — apri tab Grafo per visualizzarlo','found');
 
     advance('Analisi completata','found');
-    renderProgress(100,'Completato &#10003;');
+    renderProgress(100,'Completato \u2713');
     STEPS.forEach((_,i)=>setStep(i,'done'));
     bLog('OSINT completato per: '+name,'ok');
     loadStats();
@@ -751,11 +806,10 @@ function addEvidence(src,kind,url,label,conf){
 // ─── GRAPH ────────────────────────────────────────────────────────
 let graphData=null;
 function buildGraphFromData(data,name){
-  const nodes=[];
-  const edges=[];
+  const nodes=[],edges=[];
   const personId='person:'+name;
   nodes.push({id:personId,label:name,type:'person'});
-  (data.reverse_image?.sources||{})&&Object.entries(data.reverse_image?.sources||{}).forEach(([src,v])=>{
+  Object.entries(data.reverse_image?.sources||{}).forEach(([src,v])=>{
     const sid='site:'+src;
     if(!nodes.find(n=>n.id===sid))nodes.push({id:sid,label:src,type:'site'});
     edges.push({source:personId,target:sid,label:'reverse_image'});
@@ -781,7 +835,7 @@ async function loadGraph(runId){
   try{
     const r=await API('/osint/graph/'+runId);
     if(!r.ok)return;
-    graphData=await r.json();
+    graphData=await safeJson(r);
     renderGraph();
   }catch{}
 }
@@ -803,29 +857,22 @@ function renderGraph(){
     const r=Math.min(cx,cy)*.72;
     pos[n.id]={x:cx+r*Math.cos(angle),y:cy+r*Math.sin(angle)};
   });
-  // Edges
-  ctx.strokeStyle='rgba(255,255,255,.1)';
-  ctx.lineWidth=1;
+  ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;
   edges.forEach(e=>{
     const a=pos[e.source],b=pos[e.target];
     if(!a||!b)return;
     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
   });
-  // Nodes
   nodes.forEach(n=>{
     const p=pos[n.id];if(!p)return;
     const r=n.type==='person'?14:9;
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,r,0,2*Math.PI);
-    ctx.fillStyle=colors[n.type]||'#566070';
-    ctx.fill();
-    ctx.fillStyle='rgba(10,12,16,.7)';
+    ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);
+    ctx.fillStyle=colors[n.type]||'#566070';ctx.fill();
     ctx.font=(n.type==='person'?'bold ':'')+'10px Inter,sans-serif';
     ctx.textAlign='center';
     const lbl=(n.label||'').slice(0,18);
-    ctx.fillText(lbl,p.x,p.y+r+11);
-    ctx.fillStyle=colors[n.type]||'#566070';
-    ctx.fillText(lbl,p.x,p.y+r+10);
+    ctx.fillStyle='rgba(10,12,16,.7)';ctx.fillText(lbl,p.x,p.y+r+11);
+    ctx.fillStyle=colors[n.type]||'#566070';ctx.fillText(lbl,p.x,p.y+r+10);
   });
 }
 
@@ -834,7 +881,7 @@ async function loadStats(){
   try{
     const r=await API('/osint/stats');
     if(!r.ok)return;
-    const d=await r.json();
+    const d=await safeJson(r);
     $('statTotal').textContent=d.total_runs??'—';
     $('statAvgRisk').textContent=d.avg_risk_score!=null?Math.round(d.avg_risk_score*100)+'%':'—';
     const evCount=Object.values(d.evidence_by_source||{}).reduce((a,b)=>a+b,0);
@@ -858,7 +905,8 @@ async function generatePdf(){
   const runMaigret=$('pdfMaigret').checked;
   if(!name){setPdfStatus('Inserisci il nome target.','error');return;}
   if(!fileInput.files.length&&!capturedImageBlob){setPdfStatus('Seleziona un immagine.','error');return;}
-  const imgBlob=fileInput.files.length?fileInput.files[0]:capturedImageBlob;
+  const rawBlob=fileInput.files.length?fileInput.files[0]:capturedImageBlob;
+  const imgBlob=await toJpegBlob(rawBlob);
   setPdfStatus('Generazione PDF in corso...','loading');
   try{
     const form=new FormData();
@@ -866,7 +914,10 @@ async function generatePdf(){
     form.append('file',imgBlob,'target.jpg');
     form.append('run_maigret',runMaigret?'true':'false');
     const res=await API('/report/pdf',{method:'POST',body:form});
-    if(!res.ok)throw new Error((await res.json()).detail||res.status);
+    if(!res.ok){
+      const d=await safeJson(res);
+      throw new Error(d.detail||d._raw||res.status);
+    }
     const blob=await res.blob();
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
