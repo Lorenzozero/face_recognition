@@ -1,16 +1,44 @@
-version: '2.3'
+version: '3.9'
 
 services:
   face_recognition:
-    image: face_recognition
-    container_name: face_recognition
-    working_dir: /face_recognition/examples
+    image: face_recognition_ng
+    container_name: face_recognition_ng
     build:
       context: .
-      #Uncomment this line to run the example on the GPU (requires Nvidia-Docker)
-      # dockerfile: Dockerfile.gpu 
-    command: python3 -u find_faces_in_picture_cnn.py
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FR_API_TOKEN=${FR_API_TOKEN:-changeme}
+      - OSINT_CACHE_TTL_HOURS=${OSINT_CACHE_TTL_HOURS:-24}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - OSINT_ENABLE_EXTERNAL=${OSINT_ENABLE_EXTERNAL:-true}
     volumes:
-      - ./:/face_recognition
-    #Uncomment this line to run the example on the GPU (requires Nvidia-Docker)
-    # runtime: nvidia
+      - face_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # GPU variant (decommentare e commentare il servizio sopra)
+  # face_recognition_gpu:
+  #   image: face_recognition_ng_gpu
+  #   container_name: face_recognition_ng_gpu
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.gpu
+  #   ports:
+  #     - "8000:8000"
+  #   runtime: nvidia
+  #   environment:
+  #     - FR_API_TOKEN=${FR_API_TOKEN:-changeme}
+  #   volumes:
+  #     - face_data:/app/data
+  #   restart: unless-stopped
+
+volumes:
+  face_data:
