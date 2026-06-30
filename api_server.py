@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.6.2
+face_recognition-ng — FastAPI REST + WebSocket Server v4.6.3
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.6.2",
+    version="4.6.3",
     lifespan=lifespan,
 )
 
@@ -143,7 +143,6 @@ class OsintSearchRequest(BaseModel):
 # — Helper —
 
 def _safe_face_locations(img_array: np.ndarray) -> list:
-    """Ritorna le posizioni dei volti, oppure [] se face_recognition non e' disponibile."""
     try:
         return face_recognition.face_locations(img_array)
     except Exception:
@@ -151,7 +150,6 @@ def _safe_face_locations(img_array: np.ndarray) -> list:
 
 
 def _safe_face_encodings(img_array: np.ndarray, locations: list = None) -> list:
-    """Ritorna gli encoding, oppure [] se face_recognition non e' disponibile."""
     try:
         if locations is not None:
             return face_recognition.face_encodings(img_array, locations)
@@ -186,22 +184,52 @@ def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
     return evidence
 
 
-def _build_evidence_from_social(social_data: dict) -> List[dict]:
+def _build_evidence_from_social(social_data) -> List[dict]:
+    """
+    Gestisce tutti i formati possibili di SocialLookup:
+      - search_by_name  -> {"platforms": {"instagram": {"results":[...]}, ...}}
+      - search_by_username -> {"platforms": {"instagram": {"exists":True,"url":...}}, "found":[...]}
+      - lista legacy [{"platform":..., "found":..., "url":...}]
+    """
     evidence = []
-    platforms = []
+    if not social_data:
+        return evidence
+
     if isinstance(social_data, dict):
-        platforms = social_data.get("platforms", [])
+        platforms_raw = social_data.get("platforms", {})
+        if isinstance(platforms_raw, dict):
+            items = list(platforms_raw.values())
+        elif isinstance(platforms_raw, list):
+            items = platforms_raw
+        else:
+            items = []
     elif isinstance(social_data, list):
-        platforms = social_data
-    for p in platforms:
-        if p.get("found") and p.get("url"):
+        items = social_data
+    else:
+        return evidence
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        # search_by_username: {"platform": ..., "url": ..., "exists": True}
+        if item.get("exists") and item.get("url"):
             evidence.append({
-                "source": p.get("platform", "social"),
-                "url": p["url"],
+                "source": item.get("platform", "social"),
+                "url": item["url"],
                 "kind": "social_profile",
                 "confidence": 0.8,
-                "meta": {"platform": p.get("platform"), "username": p.get("username")},
+                "meta": {"platform": item.get("platform")},
             })
+        # search_by_name: {"platform": ..., "results": [{"url": ..., "title": ...}]}
+        for r in item.get("results", []):
+            if isinstance(r, dict) and r.get("url"):
+                evidence.append({
+                    "source": item.get("platform", "social"),
+                    "url": r["url"],
+                    "kind": "social_search",
+                    "confidence": 0.5,
+                    "meta": {"title": r.get("title"), "platform": item.get("platform")},
+                })
     return evidence
 
 
@@ -231,8 +259,18 @@ def _build_evidence_from_maigret(maigret_data: dict) -> List[dict]:
 
 def _compute_risk_score(osint_data: dict) -> float:
     social_d = osint_data.get("social") or {}
-    platforms = social_d.get("platforms") or []
-    found_social = sum(1 for p in platforms if p.get("found"))
+    platforms = social_d.get("platforms") or {}
+    if isinstance(platforms, dict):
+        found_social = sum(
+            1 for v in platforms.values()
+            if isinstance(v, dict) and (
+                v.get("exists") or len(v.get("results", [])) > 0
+            )
+        )
+    elif isinstance(platforms, list):
+        found_social = sum(1 for p in platforms if isinstance(p, dict) and p.get("found"))
+    else:
+        found_social = 0
     social_score = min(1.0, found_social / 10.0) * 0.4
 
     maigret_d = osint_data.get("maigret") or {}
@@ -254,12 +292,12 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.6.2"}
+    return {"status": "ok", "version": "4.6.3"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.2"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.3"}
 
 
 # — Endpoint core riconoscimento —
