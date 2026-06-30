@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.6.1
+face_recognition-ng — FastAPI REST + WebSocket Server v4.6.2
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.6.1",
+    version="4.6.2",
     lifespan=lifespan,
 )
 
@@ -141,6 +141,24 @@ class OsintSearchRequest(BaseModel):
     run_maigret: bool = False
 
 # — Helper —
+
+def _safe_face_locations(img_array: np.ndarray) -> list:
+    """Ritorna le posizioni dei volti, oppure [] se face_recognition non e' disponibile."""
+    try:
+        return face_recognition.face_locations(img_array)
+    except Exception:
+        return []
+
+
+def _safe_face_encodings(img_array: np.ndarray, locations: list = None) -> list:
+    """Ritorna gli encoding, oppure [] se face_recognition non e' disponibile."""
+    try:
+        if locations is not None:
+            return face_recognition.face_encodings(img_array, locations)
+        return face_recognition.face_encodings(img_array)
+    except Exception:
+        return []
+
 
 def load_image_from_upload(file: UploadFile) -> np.ndarray:
     contents = file.file.read()
@@ -236,20 +254,20 @@ def _compute_risk_score(osint_data: dict) -> float:
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.6.1"}
+    return {"status": "ok", "version": "4.6.2"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.1"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.2"}
 
 
 # — Endpoint core riconoscimento —
 @app.post("/encode", response_model=EncodeResponse)
 def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)):
     img = load_image_from_upload(file)
-    locations = face_recognition.face_locations(img)
-    encodings = face_recognition.face_encodings(img)
+    locations = _safe_face_locations(img)
+    encodings = _safe_face_encodings(img, locations)
     return EncodeResponse(
         faces_found=len(encodings),
         encodings=[e.tolist() for e in encodings],
@@ -260,7 +278,7 @@ def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)
 @app.post("/detect", response_model=DetectResponse)
 def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token)):
     img = load_image_from_upload(file)
-    locations = face_recognition.face_locations(img)
+    locations = _safe_face_locations(img)
     return DetectResponse(faces_found=len(locations), locations=[list(loc) for loc in locations])
 
 
@@ -268,8 +286,11 @@ def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token
 def compare_faces(body: CompareRequest, token: str = Depends(verify_token)):
     enc_a = np.array(body.encoding_a)
     enc_b = np.array(body.encoding_b)
-    distances = face_recognition.face_distance([enc_a], enc_b)
-    distance = float(distances[0])
+    try:
+        distances = face_recognition.face_distance([enc_a], enc_b)
+        distance = float(distances[0])
+    except Exception:
+        distance = 1.0
     return CompareResponse(match=distance <= body.tolerance, distance=round(distance, 4))
 
 
@@ -280,7 +301,7 @@ def register_face(
     token: str = Depends(verify_token),
 ):
     img = load_image_from_upload(file)
-    encodings = face_recognition.face_encodings(img)
+    encodings = _safe_face_encodings(img)
     if not encodings:
         raise HTTPException(status_code=400, detail="Nessun volto trovato nell'immagine")
     face_id = db.register(name, encodings[0])
@@ -304,8 +325,12 @@ def delete_known_face(face_id: int, token: str = Depends(verify_token)):
 async def osint_image_search(request: Request, file: UploadFile = File(...), token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_image", limit=LIMIT_OSINT_IMAGE)
     contents = await file.read()
-    img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-    locations = face_recognition.face_locations(img_array)
+    try:
+        img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
+        locations = _safe_face_locations(img_array)
+    except Exception:
+        img_array = None
+        locations = []
     image_hash = _get_image_hash(contents)
     cached = osint_db.get_fresh_run(image_hash, run_type="image")
     if cached:
@@ -313,14 +338,17 @@ async def osint_image_search(request: Request, file: UploadFile = File(...), tok
         cached["from_cache"] = True
         return cached
     face_bytes = contents
-    if locations:
-        top, right, bottom, left = locations[0]
-        h, w = img_array.shape[:2]
-        pad = 30
-        face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
-        buf = io.BytesIO()
-        face_crop.save(buf, format="JPEG", quality=90)
-        face_bytes = buf.getvalue()
+    if locations and img_array is not None:
+        try:
+            top, right, bottom, left = locations[0]
+            h, w = img_array.shape[:2]
+            pad = 30
+            face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
+            buf = io.BytesIO()
+            face_crop.save(buf, format="JPEG", quality=90)
+            face_bytes = buf.getvalue()
+        except Exception:
+            pass
     reverse = await osint.search(face_bytes)
     reverse["faces_detected"] = len(locations)
     reverse["face_cropped"] = len(locations) > 0
@@ -362,8 +390,11 @@ async def osint_social_search(request: Request, body: OsintSearchRequest, token:
 async def osint_full(request: Request, name: str = Form(...), file: UploadFile = File(...), run_maigret: bool = Form(False), token: str = Depends(verify_token)):
     limiter.check(request, tag="osint_full", limit=LIMIT_OSINT_FULL)
     contents = await file.read()
-    img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-    locations = face_recognition.face_locations(img_array)
+    try:
+        img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
+        locations = _safe_face_locations(img_array)
+    except Exception:
+        locations = []
     image_hash = _get_image_hash(contents)
     cached = osint_db.get_fresh_run(image_hash, run_type="full")
     if cached:
@@ -393,17 +424,24 @@ async def osint_full(request: Request, name: str = Form(...), file: UploadFile =
 async def generate_pdf_report(request: Request, name: str = Form(...), file: UploadFile = File(...), run_maigret: bool = Form(False), token: str = Depends(verify_token)):
     limiter.check(request, tag="report_pdf", limit=LIMIT_OSINT_FULL)
     contents = await file.read()
-    img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-    locations = face_recognition.face_locations(img_array)
+    try:
+        img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
+        locations = _safe_face_locations(img_array)
+    except Exception:
+        img_array = None
+        locations = []
     face_bytes = None
-    if locations:
-        top, right, bottom, left = locations[0]
-        h, w = img_array.shape[:2]
-        pad = 30
-        face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
-        buf = io.BytesIO()
-        face_crop.save(buf, format="JPEG", quality=90)
-        face_bytes = buf.getvalue()
+    if locations and img_array is not None:
+        try:
+            top, right, bottom, left = locations[0]
+            h, w = img_array.shape[:2]
+            pad = 30
+            face_crop = PIL.Image.fromarray(img_array[max(0,top-pad):min(h,bottom+pad), max(0,left-pad):min(w,right+pad)])
+            buf = io.BytesIO()
+            face_crop.save(buf, format="JPEG", quality=90)
+            face_bytes = buf.getvalue()
+        except Exception:
+            pass
     reverse = await osint.search(contents)
     social_results = await social.search_by_name(name)
     osint_links = social.generate_osint_report_links(name)

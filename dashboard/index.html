@@ -32,7 +32,7 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh
   padding:0 1.5rem;flex-shrink:0;gap:1rem;
 }
 .topbar-left{display:flex;align-items:center;gap:1rem}
-.logo{font-size:.95rem;font-weight:700;color:var(--ac);letter-spacing:-.01em}
+.logo{font-size:1rem;font-weight:700;color:var(--ac);letter-spacing:-.01em}
 .pill{
   font-size:.68rem;padding:.2rem .65rem;border-radius:999px;
   border:1px solid var(--bd);background:var(--s2);color:var(--mu);
@@ -64,10 +64,15 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh
 }
 .panel:last-child{border-right:none}
 .panel-header{
-  height:40px;background:var(--s1);border-bottom:1px solid var(--bd);
-  display:flex;align-items:center;padding:0 1rem;gap:.6rem;flex-shrink:0;
+  height:44px;background:var(--s1);border-bottom:1px solid var(--bd);
+  display:flex;align-items:center;justify-content:center;
+  padding:0 1rem;gap:.6rem;flex-shrink:0;
 }
-.panel-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--mu)}
+.panel-title{
+  font-size:.78rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.08em;
+  color:var(--tx);text-align:center;
+}
 .panel-body{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
 
 /* ============ LEFT PANEL — CAMERA ============ */
@@ -76,6 +81,12 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh
 }
 #videoEl{width:100%;height:100%;object-fit:cover;display:block}
 #overlayCanvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.cam-placeholder{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:.6rem;
+  color:var(--mu);font-size:.8rem;text-align:center;padding:1rem;
+}
+.cam-placeholder .icon{font-size:2.5rem;opacity:.35}
 .cam-controls{
   padding:.75rem 1rem;
   background:var(--s1);border-top:1px solid var(--bd);
@@ -85,12 +96,13 @@ body{background:var(--bg);color:var(--tx);font-family:var(--fn);min-height:100vh
 btn,.btn{
   padding:.42rem 1rem;border-radius:.45rem;border:1px solid var(--bd);
   background:var(--s2);color:var(--tx);font-size:.8rem;cursor:pointer;
-  font-family:var(--fn);transition:border-color .12s,color .12s;
+  font-family:var(--fn);transition:border-color .12s,color .12s,opacity .12s;
   white-space:nowrap;
 }
-btn:hover,.btn:hover{border-color:var(--ac);color:var(--ac)}
+btn:hover:not(:disabled),.btn:hover:not(:disabled){border-color:var(--ac);color:var(--ac)}
+btn:disabled,.btn:disabled{opacity:.35;cursor:not-allowed;pointer-events:none}
 .btn-primary{background:var(--ac);color:#0a0c10;border-color:var(--ac);font-weight:700}
-.btn-primary:hover{opacity:.88;color:#0a0c10;border-color:var(--ac)}
+.btn-primary:hover:not(:disabled){opacity:.88;color:#0a0c10;border-color:var(--ac)}
 .btn-danger{border-color:var(--re);color:var(--re);background:#2b0d0d}
 .btn-sm{padding:.3rem .7rem;font-size:.73rem}
 .inp{
@@ -117,12 +129,24 @@ btn:hover,.btn:hover{border-color:var(--ac);color:var(--ac)}
   display:flex;flex-direction:column;gap:0;flex:1;overflow:hidden;
 }
 
-/* TARGET INPUT */
+/* TARGET INPUT + PREVIEW */
 .target-bar{
-  padding:.75rem 1rem;
+  padding:.65rem 1rem;
   background:var(--s1);border-bottom:1px solid var(--bd);
   display:flex;gap:.5rem;align-items:center;flex-shrink:0;
 }
+
+/* Photo preview box */
+.photo-preview{
+  width:48px;height:48px;border-radius:.45rem;
+  border:2px dashed var(--bd);background:var(--s3);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;flex-shrink:0;cursor:pointer;
+  transition:border-color .15s;
+}
+.photo-preview:hover{border-color:var(--ac)}
+.photo-preview img{width:100%;height:100%;object-fit:cover;border-radius:.35rem}
+.photo-preview .ph-icon{font-size:1.3rem;color:var(--mu)}
 
 /* PROGRESS */
 .progress-wrap{
@@ -161,9 +185,9 @@ btn:hover,.btn:hover{border-color:var(--ac);color:var(--ac)}
   display:flex;border-bottom:1px solid var(--bd);background:var(--s1);flex-shrink:0;
 }
 .tab{
-  padding:.55rem 1.1rem;font-size:.75rem;font-weight:500;color:var(--mu);
+  flex:1;padding:.55rem .4rem;font-size:.72rem;font-weight:500;color:var(--mu);
   cursor:pointer;border-bottom:2px solid transparent;
-  transition:color .12s;
+  transition:color .12s;text-align:center;
 }
 .tab.active{color:var(--ac);border-bottom-color:var(--ac)}
 .tab-content{flex:1;overflow-y:auto;min-height:0}
@@ -180,9 +204,7 @@ btn:hover,.btn:hover{border-color:var(--ac);color:var(--ac)}
   background:var(--s2);border:1px solid var(--bd);
   font-size:.78rem;line-height:1.5;
 }
-.reason-entry .ic{
-  font-size:.85rem;flex-shrink:0;margin-top:.05rem;
-}
+.reason-entry .ic{font-size:.85rem;flex-shrink:0;margin-top:.05rem}
 .reason-entry.step .ic{color:var(--bl)}
 .reason-entry.found .ic{color:var(--gr)}
 .reason-entry.warn .ic{color:var(--or)}
@@ -216,13 +238,10 @@ td{padding:.45rem .6rem;vertical-align:middle}
 /* GRAPH */
 .graph-wrap{
   position:relative;background:var(--s2);border-radius:.5rem;
-  border:1px solid var(--bd);overflow:hidden;
-  min-height:320px;
+  border:1px solid var(--bd);overflow:hidden;min-height:320px;
 }
 #graphCanvas{width:100%;display:block}
-.graph-legend{
-  display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.6rem;
-}
+.graph-legend{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.6rem}
 .legend-item{display:flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--mu)}
 .legend-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
 
@@ -242,17 +261,13 @@ td{padding:.45rem .6rem;vertical-align:middle}
 .risk-bar-bg{height:10px;background:var(--s3);border-radius:999px;overflow:hidden}
 .risk-bar-fill{
   height:100%;border-radius:999px;
-  transition:width .6s cubic-bezier(.4,0,.2,1);
-  width:0%;
+  transition:width .6s cubic-bezier(.4,0,.2,1);width:0%;
 }
-.risk-label{
-  display:flex;justify-content:space-between;
-  font-size:.72rem;color:var(--mu);margin-top:.3rem;
-}
+.risk-label{display:flex;justify-content:space-between;font-size:.72rem;color:var(--mu);margin-top:.3rem}
 
 /* BOTTOM LOG */
 .bottom-log{
-  height:90px;background:var(--s1);border-top:1px solid var(--bd);
+  height:88px;background:var(--s1);border-top:1px solid var(--bd);
   overflow-y:auto;padding:.4rem .8rem;flex-shrink:0;
   font-family:monospace;font-size:.7rem;color:var(--mu);
 }
@@ -299,13 +314,17 @@ td{padding:.45rem .6rem;vertical-align:middle}
   <!-- LEFT: CAMERA -->
   <div class="panel">
     <div class="panel-header">
-      <span style="font-size:.75rem">&#127909;</span>
-      <span class="panel-title">Camera & Riconoscimento</span>
+      <span style="font-size:.9rem">&#127909;</span>
+      <span class="panel-title">Camera &amp; Riconoscimento</span>
     </div>
     <div class="panel-body">
       <div class="cam-area">
         <video id="videoEl" autoplay muted playsinline></video>
         <canvas id="overlayCanvas"></canvas>
+        <div class="cam-placeholder" id="camPlaceholder">
+          <span class="icon">&#128249;</span>
+          <span id="camPlaceholderMsg">Avvia la webcam per il riconoscimento live</span>
+        </div>
       </div>
       <div class="face-strip" id="faceStrip">
         <span style="color:var(--mu);font-size:.72rem">Nessun volto rilevato</span>
@@ -314,7 +333,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
         <div class="btn-row">
           <button class="btn btn-primary" id="startBtn" onclick="startWebcam()">&#9654; Webcam</button>
           <button class="btn" id="stopBtn" onclick="stopStream()" disabled>&#9209; Stop</button>
-          <button class="btn" onclick="captureAndRegister()">&#128248; Registra</button>
+          <button class="btn" id="registerBtn" onclick="captureAndRegister()" disabled>&#128248; Registra</button>
           <button class="btn" onclick="loadKnown()">&#128260; Volti noti</button>
         </div>
         <div class="btn-row">
@@ -328,22 +347,25 @@ td{padding:.45rem .6rem;vertical-align:middle}
   <!-- RIGHT: OSINT -->
   <div class="panel">
     <div class="panel-header">
-      <span style="font-size:.75rem">&#128270;</span>
+      <span style="font-size:.9rem">&#128270;</span>
       <span class="panel-title">OSINT Intelligence</span>
     </div>
     <div class="panel-body osint-body">
 
-      <!-- Target bar -->
+      <!-- Target bar con anteprima foto -->
       <div class="target-bar">
+        <!-- Anteprima foto cliccabile -->
+        <div class="photo-preview" id="photoPreview" onclick="document.getElementById('targetFile').click()" title="Clicca per caricare foto">
+          <span class="ph-icon">&#128247;</span>
+        </div>
         <input class="inp" id="targetName" placeholder="Nome target (es. Mario Rossi)">
         <input type="file" id="targetFile" accept="image/*,.heic,.heif" style="display:none" onchange="handleFileSelect()">
-        <button class="btn btn-sm" onclick="document.getElementById('targetFile').click()">&#128247; Foto</button>
         <button class="btn btn-primary btn-sm" onclick="runOsintFull()">&#9654; Analizza</button>
-        <button class="btn btn-sm" style="border-color:var(--or);color:var(--or)" onclick="captureForOsint()">&#128249; Usa cam</button>
+        <button class="btn btn-sm" id="camOsintBtn" style="border-color:var(--or);color:var(--or)" onclick="captureForOsint()">&#128249; Cam</button>
       </div>
 
       <!-- Progress -->
-      <div class="progress-wrap" id="progressWrap">
+      <div class="progress-wrap">
         <div class="progress-meta">
           <span class="progress-label" id="progressLabel">In attesa...</span>
           <span class="progress-pct" id="progressPct">0%</span>
@@ -356,7 +378,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
 
       <!-- Tabs -->
       <div class="tab-bar">
-        <div class="tab active" data-tab="reasoning" onclick="switchTab('reasoning')">&#129504; Ragionamento</div>
+        <div class="tab active" data-tab="reasoning" onclick="switchTab('reasoning')">&#129504; Log</div>
         <div class="tab" data-tab="evidence" onclick="switchTab('evidence')">&#128203; Evidenze</div>
         <div class="tab" data-tab="graph" onclick="switchTab('graph')">&#9178; Grafo</div>
         <div class="tab" data-tab="stats" onclick="switchTab('stats')">&#128200; Stats</div>
@@ -370,7 +392,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
           <div class="reason-log" id="reasonLog">
             <div class="reason-entry step">
               <span class="ic">&#8505;</span>
-              <span>Inserisci un nome target e una foto (o usa la webcam), poi premi <strong>Analizza</strong>.</span>
+              <span>Inserisci un nome target e una foto, poi premi <strong>Analizza</strong>.</span>
               <span class="ts">--:--</span>
             </div>
           </div>
@@ -419,7 +441,7 @@ td{padding:.45rem .6rem;vertical-align:middle}
         <!-- PDF -->
         <div class="tab-pane" id="pane-pdf">
           <div class="pdf-section">
-            <label>Nome target (pre-compilato dal campo OSINT)</label>
+            <label>Nome target</label>
             <input class="inp" id="pdfName" placeholder="Mario Rossi">
             <label>Immagine volto</label>
             <input type="file" id="pdfFile" accept="image/*,.heic,.heif" style="margin-top:.2rem">
@@ -434,209 +456,181 @@ td{padding:.45rem .6rem;vertical-align:middle}
           </div>
         </div>
 
-      </div><!-- tab-content -->
+      </div>
+    </div>
+  </div>
 
-    </div><!-- osint-body -->
-  </div><!-- right panel -->
-
-</div><!-- workspace -->
+</div>
 
 <!-- BOTTOM LOG -->
 <div class="bottom-log" id="bottomLog"></div>
 
 <script>
-// ─── STATE ───────────────────────────────────────────────────────
+// ─── RILEVAMENTO LOCALE vs REMOTO ───────────────────────────
+const IS_LOCAL = ['localhost','127.0.0.1','::1'].includes(location.hostname);
+
+// ─── STATE ─────────────────────────────────────────────
 let ws = null, camStream = null, frameCount = 0, lastFpsTime = Date.now();
 let osintRunId = null, capturedImageBlob = null;
-const STEPS = ['Hashing','Reverse Image','Social Lookup','Maigret','Risk Score','Grafo'];
+const STEPS = ['Hashing','Rev.Img','Social','Maigret','Risk','Grafo'];
 
-// ─── UTILS ───────────────────────────────────────────────────────
-const $  = id => document.getElementById(id);
+// ─── UTILS ─────────────────────────────────────────────
+const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString();
 const token = () => $('tokenInput').value.trim() || 'changeme';
 
-// Safe fetch: legge sempre come testo, parsa JSON solo se Content-Type lo indica
 async function safeJson(res) {
   const ct = res.headers.get('content-type') || '';
   const text = await res.text();
   if (ct.includes('application/json')) {
     try { return JSON.parse(text); }
-    catch(e) { throw new Error('Risposta non valida dal server: ' + text.slice(0,120)); }
+    catch(e) { throw new Error('Risposta non valida: ' + text.slice(0,120)); }
   }
-  // Server ha risposto con HTML/testo (es. 500 Internal Server Error)
-  if (!res.ok) throw new Error(`Server error ${res.status}: ${text.slice(0,120)}`);
+  if (!res.ok) throw new Error(`Errore ${res.status}: ${text.slice(0,120)}`);
   try { return JSON.parse(text); } catch { return { _raw: text }; }
 }
 
 const API = (p, o={}) => fetch(p, {headers:{'Authorization':'Bearer '+token()}, ...o});
 
-// Converte qualsiasi File (incluso HEIC) in Blob JPEG tramite canvas
 async function toJpegBlob(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || img.width;
-      canvas.height = img.naturalHeight || img.height;
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      canvas.toBlob(blob => {
-        URL.revokeObjectURL(url);
-        if (blob) resolve(blob);
-        else reject(new Error('Conversione immagine fallita'));
-      }, 'image/jpeg', 0.92);
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth || img.width;
+      c.height = img.naturalHeight || img.height;
+      c.getContext('2d').drawImage(img, 0, 0);
+      c.toBlob(blob => { URL.revokeObjectURL(url); resolve(blob || file); }, 'image/jpeg', 0.92);
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      // HEIC non supportato dal browser — fallback: usa il file originale
-      bLog('Browser non supporta HEIC nativo, invio file originale', 'info');
-      resolve(file);
-    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
     img.src = url;
   });
 }
 
-function bLog(msg,cls=''){
-  const el=$('bottomLog'),d=document.createElement('div');
+function bLog(msg, cls='') {
+  const el=$('bottomLog'), d=document.createElement('div');
   d.className='bl-entry '+cls;
   d.textContent=`[${ts()}] ${msg}`;
   el.prepend(d);
-  if(el.children.length>80)el.removeChild(el.lastChild);
+  if(el.children.length>80) el.removeChild(el.lastChild);
 }
 
-function addReason(msg,type='step'){
+function addReason(msg, type='step') {
   const icons={step:'&#8505;',found:'&#10003;',warn:'&#9888;',err:'&#9747;'};
-  const el=$('reasonLog'),d=document.createElement('div');
+  const el=$('reasonLog'), d=document.createElement('div');
   d.className='reason-entry '+type;
   d.innerHTML=`<span class="ic">${icons[type]||'&#8505;'}</span><span>${msg}</span><span class="ts">${ts()}</span>`;
   el.prepend(d);
 }
 
-// ─── TABS ─────────────────────────────────────────────────────────
-function switchTab(name){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
-  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+name));
-  if(name==='graph'&&osintRunId)loadGraph(osintRunId);
-  if(name==='stats')loadStats();
+// ─── INIT WEBCAM STATE ──────────────────────────────────
+function initWebcamUI() {
+  if (!IS_LOCAL) {
+    $('startBtn').disabled = true;
+    $('camOsintBtn').disabled = true;
+    $('registerBtn').disabled = true;
+    $('camPlaceholderMsg').textContent = 'Webcam non disponibile su Railway — usa 📸 Foto';
+    bLog('Modalità remota — webcam disabilitata, usa il pulsante Foto', 'info');
+  }
 }
 
-// ─── PROGRESS ─────────────────────────────────────────────────────
-let progressState = {};
-function initProgress(){
-  progressState={done:[],active:null,failed:[]};
-  renderProgress(0,'Inizializzazione...');
-  const wrap=$('progressSteps');
-  wrap.innerHTML=STEPS.map((s,i)=>`<span class="step-dot" id="sdot-${i}">${s}</span>`).join('');
+// ─── TABS ────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+name));
+  if(name==='graph'&&osintRunId) loadGraph(osintRunId);
+  if(name==='stats') loadStats();
 }
-function setStep(idx,state){
-  STEPS.forEach((_,i)=>{
-    const d=$(`sdot-${i}`);
-    if(!d)return;
-    d.className='step-dot'+(i<idx?' done':i===idx?' '+state:'');
-  });
+
+// ─── PROGRESS ──────────────────────────────────────────────
+function initProgress() {
+  renderProgress(0, 'Inizializzazione...');
+  $('progressSteps').innerHTML = STEPS.map((s,i)=>`<span class="step-dot" id="sdot-${i}">${s}</span>`).join('');
 }
-function renderProgress(pct,label){
+function setStep(idx, state) {
+  STEPS.forEach((_,i)=>{ const d=$(`sdot-${i}`); if(!d)return; d.className='step-dot'+(i<idx?' done':i===idx?' '+state:''); });
+}
+function renderProgress(pct, label) {
   $('progressFill').style.width=pct+'%';
   $('progressPct').textContent=pct+'%';
   $('progressLabel').textContent=label;
 }
 
-// ─── CAMERA ───────────────────────────────────────────────────────
-async function startWebcam(){
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    bLog('Webcam non disponibile — questa funzione richiede accesso locale al browser (non funziona su Railway/cloud)','er');
-    addReason('Webcam non disponibile su server remoto. Usa il pulsante 📸 Foto per caricare un’immagine.','warn');
+// ─── CAMERA ──────────────────────────────────────────────
+async function startWebcam() {
+  if (!IS_LOCAL) {
+    bLog('Webcam disponibile solo in locale', 'er');
     return;
   }
-  try{
-    camStream=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
-    const v=$('videoEl');v.srcObject=camStream;
-    $('camBadge').textContent='\u25CF Cam live';
-    $('camBadge').className='pill live';
-    $('startBtn').disabled=true;$('stopBtn').disabled=false;
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
+    const v=$('videoEl'); v.srcObject=camStream;
+    $('camBadge').textContent='\u25CF Cam live'; $('camBadge').className='pill live';
+    $('camPlaceholder').style.display='none';
+    $('startBtn').disabled=true; $('stopBtn').disabled=false; $('registerBtn').disabled=false;
     bLog('Webcam avviata','ok');
     connectWS();
-  }catch(e){
-    const msg = e.name==='NotFoundError'
-      ? 'Nessuna webcam trovata — usa il pulsante 📸 Foto per caricare un’immagine'
-      : e.name==='NotAllowedError'
-      ? 'Permesso webcam negato dal browser'
+  } catch(e) {
+    const msg = e.name==='NotFoundError' ? 'Nessuna webcam trovata'
+      : e.name==='NotAllowedError' ? 'Permesso webcam negato'
       : 'Errore webcam: '+e.message;
     bLog(msg,'er');
-    addReason(msg,'warn');
   }
 }
 
-function connectWS(){
+function connectWS() {
   const proto=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(`${proto}://${location.host}/ws/stream`);
-  ws.onopen=()=>{
-    $('wsBadge').textContent='\u25CF WS live';
-    $('wsBadge').className='pill live';
-    bLog('WebSocket connesso','ok');
-    sendFrameLoop();
-  };
+  ws.onopen=()=>{ $('wsBadge').textContent='\u25CF WS live'; $('wsBadge').className='pill live'; bLog('WebSocket connesso','ok'); sendFrameLoop(); };
   ws.onmessage=handleWsMsg;
   ws.onerror=()=>bLog('Errore WebSocket','er');
-  ws.onclose=()=>{
-    $('wsBadge').textContent='\u25CF WS off';
-    $('wsBadge').className='pill off';
-  };
+  ws.onclose=()=>{ $('wsBadge').textContent='\u25CF WS off'; $('wsBadge').className='pill off'; };
 }
 
-function sendFrameLoop(){
-  if(!ws||ws.readyState!==WebSocket.OPEN)return;
-  const off=document.createElement('canvas');
-  off.width=640;off.height=360;
+function sendFrameLoop() {
+  if(!ws||ws.readyState!==WebSocket.OPEN) return;
+  const off=document.createElement('canvas'); off.width=640; off.height=360;
   off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
   ws.send(JSON.stringify({frame:off.toDataURL('image/jpeg',.7)}));
   const ov=$('overlayCanvas');
-  ov.width=$('videoEl').offsetWidth;ov.height=$('videoEl').offsetHeight;
+  ov.width=$('videoEl').offsetWidth; ov.height=$('videoEl').offsetHeight;
   frameCount++;
   const now=Date.now();
-  if(now-lastFpsTime>=1000){
-    $('fpsBadge').textContent=frameCount+' FPS';
-    frameCount=0;lastFpsTime=now;
-  }
+  if(now-lastFpsTime>=1000){ $('fpsBadge').textContent=frameCount+' FPS'; frameCount=0; lastFpsTime=now; }
   setTimeout(sendFrameLoop,80);
 }
 
-function handleWsMsg(ev){
-  try{
+function handleWsMsg(ev) {
+  try {
     const d=JSON.parse(ev.data);
     if(d.error){bLog(d.error,'er');return;}
-    const v=$('videoEl');
-    drawOverlay(d.faces||[],v.videoWidth||640,v.videoHeight||360);
+    drawOverlay(d.faces||[],$('videoEl').videoWidth||640,$('videoEl').videoHeight||360);
     updateFaceStrip(d.faces||[]);
-  }catch{}
+  } catch{}
 }
 
-function drawOverlay(faces,sw,sh){
+function drawOverlay(faces,sw,sh) {
   const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
   ctx.clearRect(0,0,cv.width,cv.height);
   const sx=cv.width/(sw||640),sy=cv.height/(sh||360);
   faces.forEach(f=>{
     const x=f.left*sx,y=f.top*sy,w=(f.right-f.left)*sx,h=(f.bottom-f.top)*sy;
-    ctx.strokeStyle=f.matched?'#00e5c4':'#f87171';
-    ctx.lineWidth=2;
-    ctx.strokeRect(x,y,w,h);
-    ctx.fillStyle=f.matched?'rgba(0,229,196,.85)':'rgba(248,113,113,.85)';
-    ctx.fillRect(x,y-22,w,22);
-    ctx.fillStyle='#0a0c10';ctx.font='bold 12px Inter,sans-serif';
+    ctx.strokeStyle=f.matched?'#00e5c4':'#f87171'; ctx.lineWidth=2; ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle=f.matched?'rgba(0,229,196,.85)':'rgba(248,113,113,.85)'; ctx.fillRect(x,y-22,w,22);
+    ctx.fillStyle='#0a0c10'; ctx.font='bold 12px Inter,sans-serif';
     ctx.fillText(f.matched?`${f.name} ${Math.round(f.confidence*100)}%`:'?',x+4,y-6);
   });
 }
 
-function updateFaceStrip(faces){
+function updateFaceStrip(faces) {
   const el=$('faceStrip');
   if(!faces.length){el.innerHTML='<span style="color:var(--mu);font-size:.72rem">Nessun volto rilevato</span>';return;}
-  el.innerHTML=faces.map(f=>
-    `<span class="face-tag ${f.matched?'':'unk'}">${f.matched?f.name+' '+Math.round(f.confidence*100)+'%':'Sconosciuto'}</span>`
-  ).join('');
+  el.innerHTML=faces.map(f=>`<span class="face-tag ${f.matched?'':'unk'}">${f.matched?f.name+' '+Math.round(f.confidence*100)+'%':'Sconosciuto'}</span>`).join('');
 }
 
-function startRTSP(){
-  const url=$('rtspUrl').value.trim();if(!url)return;
+function startRTSP() {
+  const url=$('rtspUrl').value.trim(); if(!url)return;
   const proto=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(`${proto}://${location.host}/ws/rtsp?url=${encodeURIComponent(url)}`);
   ws.onopen=()=>{$('wsBadge').textContent='\u25CF RTSP';$('wsBadge').className='pill live';bLog('RTSP connesso','ok');$('stopBtn').disabled=false;};
@@ -644,141 +638,138 @@ function startRTSP(){
     try{
       const d=JSON.parse(ev.data);
       if(d.error){bLog(d.error,'er');return;}
-      const img=new Image();
-      const cv=$('overlayCanvas'),ctx=cv.getContext('2d');
+      const img=new Image(),cv=$('overlayCanvas'),ctx=cv.getContext('2d');
       img.onload=()=>{cv.width=cv.offsetWidth;cv.height=cv.offsetHeight;ctx.drawImage(img,0,0,cv.width,cv.height);drawOverlay(d.faces||[],img.width,img.height);};
-      img.src=d.frame;updateFaceStrip(d.faces||[]);
+      img.src=d.frame; updateFaceStrip(d.faces||[]);
     }catch{}
   };
   ws.onerror=()=>bLog('Errore RTSP','er');
 }
 
-function stopStream(){
+function stopStream() {
   if(ws){ws.close();ws=null;}
   if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
-  $('camBadge').textContent='\u25CF Cam off';$('camBadge').className='pill off';
-  $('startBtn').disabled=false;$('stopBtn').disabled=true;
+  $('camBadge').textContent='\u25CF Cam off'; $('camBadge').className='pill off';
+  $('startBtn').disabled=IS_LOCAL?false:true;
+  $('stopBtn').disabled=true; $('registerBtn').disabled=true;
+  $('camPlaceholder').style.display='flex';
   $('overlayCanvas').getContext('2d').clearRect(0,0,9999,9999);
   $('fpsBadge').textContent='0 FPS';
   bLog('Stream fermato');
 }
 
-async function captureAndRegister(){
-  const name=prompt('Nome da associare al volto:');if(!name)return;
-  const off=document.createElement('canvas');off.width=640;off.height=360;
+async function captureAndRegister() {
+  const name=prompt('Nome da associare al volto:'); if(!name)return;
+  const off=document.createElement('canvas'); off.width=640; off.height=360;
   off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
   const blob=await new Promise(r=>off.toBlob(r,'image/jpeg',.9));
-  const form=new FormData();form.append('file',blob,'cap.jpg');
+  const form=new FormData(); form.append('file',blob,'cap.jpg');
   const res=await API(`/register?name=${encodeURIComponent(name)}`,{method:'POST',body:form});
   const d=await safeJson(res);
   if(res.ok){bLog('Registrato: '+d.name+' (ID '+d.id+')','ok');loadKnown();}
   else bLog('Errore registrazione: '+(d.detail||res.status),'er');
 }
 
-function captureForOsint(){
+function captureForOsint() {
   if(!camStream){bLog('Avvia la webcam prima','er');return;}
-  const off=document.createElement('canvas');off.width=640;off.height=360;
+  const off=document.createElement('canvas'); off.width=640; off.height=360;
   off.getContext('2d').drawImage($('videoEl'),0,0,640,360);
-  off.toBlob(b=>{capturedImageBlob=b;bLog('Frame catturato per OSINT','ok');},'image/jpeg',.9);
+  off.toBlob(b=>{
+    capturedImageBlob=b;
+    setPhotoPreview(URL.createObjectURL(b));
+    bLog('Frame catturato per OSINT','ok');
+  },'image/jpeg',.9);
 }
 
-async function handleFileSelect(){
-  const f=$('targetFile').files[0];
-  if(!f) return;
-  bLog('Immagine selezionata: '+f.name+' — conversione in corso...','info');
-  // Converti sempre in JPEG (gestisce HEIC, PNG, WebP, ecc.)
+// ─── PHOTO PREVIEW ─────────────────────────────────────────
+function setPhotoPreview(src) {
+  const p=$('photoPreview');
+  p.innerHTML=`<img src="${src}" alt="preview">`;
+}
+
+async function handleFileSelect() {
+  const f=$('targetFile').files[0]; if(!f)return;
+  bLog('Immagine selezionata: '+f.name,'info');
+  // Mostra anteprima immediata
+  setPhotoPreview(URL.createObjectURL(f));
+  // Converti in JPEG
   capturedImageBlob = await toJpegBlob(f);
   bLog('Immagine pronta ('+Math.round(capturedImageBlob.size/1024)+'KB)','ok');
 }
 
-async function loadKnown(){
+async function loadKnown() {
   const res=await API('/known');
   if(!res.ok)return;
   const data=await safeJson(res);
   bLog('Volti noti: '+data.length,'info');
 }
 
-// ─── OSINT PIPELINE ───────────────────────────────────────────────
-async function runOsintFull(){
+// ─── OSINT PIPELINE ─────────────────────────────────────────
+async function runOsintFull() {
   const name=$('targetName').value.trim();
   if(!name){bLog('Inserisci un nome target','er');addReason('Nome target mancante','warn');return;}
-  const imgBlob=capturedImageBlob;
-  if(!imgBlob){bLog('Nessuna immagine — usa "Foto" o "Usa cam"','er');addReason('Immagine mancante','warn');return;}
+  if(!capturedImageBlob){bLog('Nessuna immagine — clicca 📸 Foto','er');addReason('Immagine mancante','warn');return;}
 
   $('pdfName').value=name;
   switchTab('reasoning');
   $('reasonLog').innerHTML='';
   initProgress();
+  addReason(`Avvio analisi OSINT per: <strong>${name}</strong>`,'step');
 
-  addReason(`Avvio analisi OSINT per target: <strong>${name}</strong>`,'step');
-
-  const TOTAL_STEPS=6;
-  let currentStep=0;
-
+  const TOTAL=6; let cur=0;
   const advance=(label,type='step')=>{
-    currentStep++;
-    const pct=Math.round((currentStep/TOTAL_STEPS)*100);
-    setStep(currentStep-1,'done');
-    setStep(currentStep,'active');
-    renderProgress(pct,label);
+    cur++;
+    setStep(cur-1,'done'); setStep(cur,'active');
+    renderProgress(Math.round((cur/TOTAL)*100),label);
     addReason(label,type);
   };
 
   advance('Calcolo hash immagine...');
   await sleep(200);
+  advance('Reverse image search...');
 
-  advance('Reverse image search (Google Lens, Yandex, TinEye)...');
-
-  try{
-    const formImg=new FormData();
-    formImg.append('file',imgBlob,'target.jpg');
-    const rImg=await API('/osint/image',{method:'POST',body:formImg});
-    const dImg=await safeJson(rImg);
-    if(!rImg.ok) throw new Error(dImg.detail||dImg._raw||rImg.status);
-    const cached=dImg.from_cache;
-    addReason(`Reverse image completato — ${dImg.faces_detected??'?'} volti rilevati${cached?' (da cache)':''}`,dImg.faces_detected>0?'found':'step');
-    const sources=dImg.sources||{};
-    Object.entries(sources).forEach(([src,v])=>{
+  try {
+    const f1=new FormData(); f1.append('file',capturedImageBlob,'target.jpg');
+    const r1=await API('/osint/image',{method:'POST',body:f1});
+    const d1=await safeJson(r1);
+    if(!r1.ok) throw new Error(d1.detail||d1._raw||r1.status);
+    addReason(`Reverse image: ${d1.faces_detected??'?'} volti${d1.from_cache?' (cache)':''}`,d1.faces_detected>0?'found':'step');
+    Object.entries(d1.sources||{}).forEach(([src,v])=>{
       (v.results||[]).forEach(r=>addEvidence(src,'reverse_image',r.url,r.title||src,.6));
     });
 
-    advance('Ricerca social per nome...');
-    const rSoc=await API('/osint/social',{method:'POST',headers:{'Authorization':'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({name,run_maigret:false})});
-    const dSoc=await safeJson(rSoc);
-    if(rSoc.ok){
-      const found=(dSoc.by_name?.platforms||[]).filter(p=>p.found);
-      addReason(`Social lookup: ${found.length} profili trovati`,found.length>0?'found':'step');
+    advance('Social lookup...');
+    const r2=await API('/osint/social',{method:'POST',headers:{'Authorization':'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({name,run_maigret:false})});
+    const d2=await safeJson(r2);
+    if(r2.ok){
+      const found=(d2.by_name?.platforms||[]).filter(p=>p.found);
+      addReason(`Social: ${found.length} profili trovati`,found.length>0?'found':'step');
       found.forEach(p=>addEvidence('social','profile',p.url||'',p.platform,.75));
     }
 
-    advance('Pipeline OSINT completa + risk score...');
-    const formFull=new FormData();
-    formFull.append('file',imgBlob,'target.jpg');
-    formFull.append('name',name);
-    formFull.append('run_maigret','false');
-    const rFull=await API('/osint/full',{method:'POST',body:formFull});
-    const dFull=await safeJson(rFull);
-    if(!rFull.ok) throw new Error(dFull.detail||dFull._raw||rFull.status);
+    advance('Pipeline completa + risk score...');
+    const f3=new FormData(); f3.append('file',capturedImageBlob,'target.jpg'); f3.append('name',name); f3.append('run_maigret','false');
+    const r3=await API('/osint/full',{method:'POST',body:f3});
+    const d3=await safeJson(r3);
+    if(!r3.ok) throw new Error(d3.detail||d3._raw||r3.status);
 
-    const risk=dFull.risk_score??0;
-    addReason(`Risk score calcolato: <strong>${Math.round(risk*100)}%</strong>`,risk>.5?'warn':'found');
+    const risk=d3.risk_score??0;
+    addReason(`Risk score: <strong>${Math.round(risk*100)}%</strong>`,risk>.5?'warn':'found');
     updateRiskGauge(risk);
-    osintRunId=dFull.run_id||null;
+    osintRunId=d3.run_id||null;
+    $('statEvidence').textContent=(d3.evidence||[]).length||'—';
+    (d3.evidence||[]).forEach(e=>addEvidence(e.source,e.kind,e.url,e.url,e.confidence??0));
 
-    $('statEvidence').textContent=(dFull.evidence||[]).length||'—';
-    (dFull.evidence||[]).forEach(e=>addEvidence(e.source,e.kind,e.url,e.url,e.confidence??0));
+    advance('Costruzione grafo...');
+    buildGraphFromData(d3,name);
 
-    advance('Costruzione grafo relazioni...');
-    buildGraphFromData(dFull,name);
-    if(osintRunId) addReason('Grafo costruito — apri tab Grafo per visualizzarlo','found');
-
-    advance('Analisi completata','found');
-    renderProgress(100,'Completato \u2713');
+    advance('Completato!','found');
+    renderProgress(100,'Completato ✓');
     STEPS.forEach((_,i)=>setStep(i,'done'));
     bLog('OSINT completato per: '+name,'ok');
     loadStats();
 
-  }catch(e){
+  } catch(e) {
     addReason('Errore: '+e.message,'err');
     bLog('Errore OSINT: '+e.message,'er');
     renderProgress($('progressFill').style.width.replace('%','')||0,'Errore');
@@ -787,96 +778,75 @@ async function runOsintFull(){
 
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
-// ─── EVIDENCE TABLE ───────────────────────────────────────────────
+// ─── EVIDENCE TABLE ─────────────────────────────────────────
 function addEvidence(src,kind,url,label,conf){
   const tb=$('evidenceTable');
   if(tb.querySelector('[colspan]'))tb.innerHTML='';
-  const conf100=Math.round((conf||0)*100);
-  const srcClass=src.replace(/[^a-z0-9]/g,'_').toLowerCase();
+  const c=Math.round((conf||0)*100);
+  const sc=src.replace(/[^a-z0-9]/g,'_').toLowerCase();
   const tr=document.createElement('tr');
-  tr.innerHTML=`
-    <td><span class="badge-src ${srcClass}">${src}</span></td>
-    <td style="color:var(--mu);font-size:.72rem">${kind||''}</td>
-    <td>${url?`<a class="ext-link" href="${url}" target="_blank">${(label||url).slice(0,40)}</a>`:label||'—'}</td>
-    <td><span class="conf-bar" style="width:${conf100}px;max-width:60px"></span> <span style="font-size:.7rem;color:var(--mu)">${conf100}%</span></td>
-  `;
+  tr.innerHTML=`<td><span class="badge-src ${sc}">${src}</span></td><td style="color:var(--mu);font-size:.72rem">${kind||''}</td><td>${url?`<a class="ext-link" href="${url}" target="_blank">${(label||url).slice(0,40)}</a>`:label||'—'}</td><td><span class="conf-bar" style="width:${c}px;max-width:60px"></span> <span style="font-size:.7rem;color:var(--mu)">${c}%</span></td>`;
   tb.appendChild(tr);
 }
 
-// ─── GRAPH ────────────────────────────────────────────────────────
+// ─── GRAPH ──────────────────────────────────────────────────
 let graphData=null;
 function buildGraphFromData(data,name){
-  const nodes=[],edges=[];
-  const personId='person:'+name;
-  nodes.push({id:personId,label:name,type:'person'});
+  const nodes=[],edges=[],pid='person:'+name;
+  nodes.push({id:pid,label:name,type:'person'});
   Object.entries(data.reverse_image?.sources||{}).forEach(([src,v])=>{
     const sid='site:'+src;
     if(!nodes.find(n=>n.id===sid))nodes.push({id:sid,label:src,type:'site'});
-    edges.push({source:personId,target:sid,label:'reverse_image'});
+    edges.push({source:pid,target:sid,label:'reverse_image'});
     (v.results||[]).forEach(r=>{
       if(!r.url)return;
       const aid='account:'+r.url.slice(0,40);
       if(!nodes.find(n=>n.id===aid))nodes.push({id:aid,label:r.title||r.url.slice(0,30),type:'account'});
-      edges.push({source:sid,target:aid,label:'result'});
+      edges.push({source:sid,target:aid});
     });
   });
   (data.evidence||[]).forEach(e=>{
     if(!e.url)return;
     const aid='ev:'+e.source+':'+e.url.slice(0,30);
     if(!nodes.find(n=>n.id===aid))nodes.push({id:aid,label:e.source,type:e.kind==='profile'?'account':'site'});
-    edges.push({source:personId,target:aid,label:e.kind||'evidence'});
+    edges.push({source:pid,target:aid});
   });
-  graphData={nodes,edges,node_count:nodes.length,edge_count:edges.length};
+  graphData={nodes,edges};
   renderGraph();
   $('statSources').textContent=nodes.filter(n=>n.type==='site'||n.type==='account').length;
 }
 
 async function loadGraph(runId){
-  try{
-    const r=await API('/osint/graph/'+runId);
-    if(!r.ok)return;
-    graphData=await safeJson(r);
-    renderGraph();
-  }catch{}
+  try{ const r=await API('/osint/graph/'+runId); if(!r.ok)return; graphData=await safeJson(r); renderGraph(); }catch{}
 }
 
 function renderGraph(){
   if(!graphData)return;
-  const cv=$('graphCanvas');
-  const rect=cv.parentElement.getBoundingClientRect();
+  const cv=$('graphCanvas'),rect=cv.parentElement.getBoundingClientRect();
   cv.width=rect.width||500;cv.height=320;
-  const ctx=cv.getContext('2d');
+  const ctx=cv.getContext('2d'),{nodes,edges}=graphData;
   ctx.clearRect(0,0,cv.width,cv.height);
-  const {nodes,edges}=graphData;
   const colors={person:'#00e5c4',account:'#60a5fa',site:'#fb923c',maigret:'#7c3aed'};
-  const pos={};
-  const cx=cv.width/2,cy=cv.height/2;
+  const pos={},cx=cv.width/2,cy=cv.height/2;
   nodes.forEach((n,i)=>{
     if(i===0){pos[n.id]={x:cx,y:cy};return;}
-    const angle=(2*Math.PI/Math.max(1,nodes.length-1))*(i-1);
-    const r=Math.min(cx,cy)*.72;
-    pos[n.id]={x:cx+r*Math.cos(angle),y:cy+r*Math.sin(angle)};
+    const a=(2*Math.PI/Math.max(1,nodes.length-1))*(i-1),r=Math.min(cx,cy)*.72;
+    pos[n.id]={x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)};
   });
   ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;
-  edges.forEach(e=>{
-    const a=pos[e.source],b=pos[e.target];
-    if(!a||!b)return;
-    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
-  });
+  edges.forEach(e=>{ const a=pos[e.source],b=pos[e.target]; if(!a||!b)return; ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke(); });
   nodes.forEach(n=>{
-    const p=pos[n.id];if(!p)return;
+    const p=pos[n.id]; if(!p)return;
     const r=n.type==='person'?14:9;
-    ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);
-    ctx.fillStyle=colors[n.type]||'#566070';ctx.fill();
-    ctx.font=(n.type==='person'?'bold ':'')+'10px Inter,sans-serif';
-    ctx.textAlign='center';
+    ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fillStyle=colors[n.type]||'#566070';ctx.fill();
+    ctx.font=(n.type==='person'?'bold ':'')+'10px Inter,sans-serif';ctx.textAlign='center';
     const lbl=(n.label||'').slice(0,18);
     ctx.fillStyle='rgba(10,12,16,.7)';ctx.fillText(lbl,p.x,p.y+r+11);
     ctx.fillStyle=colors[n.type]||'#566070';ctx.fillText(lbl,p.x,p.y+r+10);
   });
 }
 
-// ─── STATS ────────────────────────────────────────────────────────
+// ─── STATS ──────────────────────────────────────────────────
 async function loadStats(){
   try{
     const r=await API('/osint/stats');
@@ -884,8 +854,8 @@ async function loadStats(){
     const d=await safeJson(r);
     $('statTotal').textContent=d.total_runs??'—';
     $('statAvgRisk').textContent=d.avg_risk_score!=null?Math.round(d.avg_risk_score*100)+'%':'—';
-    const evCount=Object.values(d.evidence_by_source||{}).reduce((a,b)=>a+b,0);
-    $('statEvidence').textContent=evCount||'—';
+    const ev=Object.values(d.evidence_by_source||{}).reduce((a,b)=>a+b,0);
+    $('statEvidence').textContent=ev||'—';
     $('statSources').textContent=Object.keys(d.evidence_by_source||{}).length||'—';
   }catch{}
 }
@@ -898,26 +868,20 @@ function updateRiskGauge(score){
   $('riskPct').textContent=pct+'%';
 }
 
-// ─── PDF ──────────────────────────────────────────────────────────
+// ─── PDF ─────────────────────────────────────────────────────
 async function generatePdf(){
   const name=$('pdfName').value.trim();
-  const fileInput=$('pdfFile');
-  const runMaigret=$('pdfMaigret').checked;
+  const fi=$('pdfFile');
   if(!name){setPdfStatus('Inserisci il nome target.','error');return;}
-  if(!fileInput.files.length&&!capturedImageBlob){setPdfStatus('Seleziona un immagine.','error');return;}
-  const rawBlob=fileInput.files.length?fileInput.files[0]:capturedImageBlob;
-  const imgBlob=await toJpegBlob(rawBlob);
-  setPdfStatus('Generazione PDF in corso...','loading');
+  if(!fi.files.length&&!capturedImageBlob){setPdfStatus('Seleziona un\'immagine.','error');return;}
+  const raw=fi.files.length?fi.files[0]:capturedImageBlob;
+  const img=await toJpegBlob(raw);
+  setPdfStatus('Generazione in corso...','loading');
   try{
     const form=new FormData();
-    form.append('name',name);
-    form.append('file',imgBlob,'target.jpg');
-    form.append('run_maigret',runMaigret?'true':'false');
+    form.append('name',name); form.append('file',img,'target.jpg'); form.append('run_maigret',$('pdfMaigret').checked?'true':'false');
     const res=await API('/report/pdf',{method:'POST',body:form});
-    if(!res.ok){
-      const d=await safeJson(res);
-      throw new Error(d.detail||d._raw||res.status);
-    }
+    if(!res.ok){const d=await safeJson(res);throw new Error(d.detail||d._raw||res.status);}
     const blob=await res.blob();
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
@@ -925,7 +889,7 @@ async function generatePdf(){
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
     setPdfStatus('PDF scaricato!','success');
-    bLog('PDF generato: '+a.download,'ok');
+    bLog('PDF: '+a.download,'ok');
   }catch(e){
     setPdfStatus('Errore: '+e.message,'error');
     bLog('Errore PDF: '+e.message,'er');
@@ -936,9 +900,10 @@ function setPdfStatus(msg,cls){
   const el=$('pdfStatus');el.textContent=msg;el.className='pdf-status '+cls;
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────
+// ─── INIT ──────────────────────────────────────────────────────
 initProgress();
-bLog('Dashboard v2 caricata — inserisci nome target + immagine, premi Analizza','info');
+initWebcamUI();
+bLog('Dashboard v2 — inserisci nome + foto, premi Analizza','info');
 </script>
 </body>
 </html>
