@@ -354,7 +354,6 @@ td{padding:.45rem .6rem;vertical-align:middle}
 
       <!-- Target bar con anteprima foto -->
       <div class="target-bar">
-        <!-- Anteprima foto cliccabile -->
         <div class="photo-preview" id="photoPreview" onclick="document.getElementById('targetFile').click()" title="Clicca per caricare foto">
           <span class="ph-icon">&#128247;</span>
         </div>
@@ -466,15 +465,12 @@ td{padding:.45rem .6rem;vertical-align:middle}
 <div class="bottom-log" id="bottomLog"></div>
 
 <script>
-// ─── RILEVAMENTO LOCALE vs REMOTO ───────────────────────────
 const IS_LOCAL = ['localhost','127.0.0.1','::1'].includes(location.hostname);
 
-// ─── STATE ─────────────────────────────────────────────
 let ws = null, camStream = null, frameCount = 0, lastFpsTime = Date.now();
 let osintRunId = null, capturedImageBlob = null;
 const STEPS = ['Hashing','Rev.Img','Social','Maigret','Risk','Grafo'];
 
-// ─── UTILS ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const ts = () => new Date().toLocaleTimeString();
 const token = () => $('tokenInput').value.trim() || 'changeme';
@@ -492,16 +488,28 @@ async function safeJson(res) {
 
 const API = (p, o={}) => fetch(p, {headers:{'Authorization':'Bearer '+token()}, ...o});
 
-async function toJpegBlob(file) {
+/**
+ * Ridimensiona l'immagine a max MAX_PX sul lato lungo, poi ricodifica in JPEG.
+ * Riduce payload da ~1.4MB a ~60-80KB prima dell'upload.
+ */
+async function toJpegBlob(file, maxPx = 800, quality = 0.88) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
+      let w = img.naturalWidth || img.width;
+      let h = img.naturalHeight || img.height;
+      if (Math.max(w, h) > maxPx) {
+        const scale = maxPx / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
       const c = document.createElement('canvas');
-      c.width = img.naturalWidth || img.width;
-      c.height = img.naturalHeight || img.height;
-      c.getContext('2d').drawImage(img, 0, 0);
-      c.toBlob(blob => { URL.revokeObjectURL(url); resolve(blob || file); }, 'image/jpeg', 0.92);
+      c.width = w;
+      c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      c.toBlob(blob => resolve(blob || file), 'image/jpeg', quality);
     };
     img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
     img.src = url;
@@ -524,7 +532,6 @@ function addReason(msg, type='step') {
   el.prepend(d);
 }
 
-// ─── INIT WEBCAM STATE ──────────────────────────────────
 function initWebcamUI() {
   if (!IS_LOCAL) {
     $('startBtn').disabled = true;
@@ -535,7 +542,6 @@ function initWebcamUI() {
   }
 }
 
-// ─── TABS ────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name));
   document.querySelectorAll('.tab-pane').forEach(p=>p.classList.toggle('active',p.id==='pane-'+name));
@@ -543,7 +549,6 @@ function switchTab(name) {
   if(name==='stats') loadStats();
 }
 
-// ─── PROGRESS ──────────────────────────────────────────────
 function initProgress() {
   renderProgress(0, 'Inizializzazione...');
   $('progressSteps').innerHTML = STEPS.map((s,i)=>`<span class="step-dot" id="sdot-${i}">${s}</span>`).join('');
@@ -557,12 +562,8 @@ function renderProgress(pct, label) {
   $('progressLabel').textContent=label;
 }
 
-// ─── CAMERA ──────────────────────────────────────────────
 async function startWebcam() {
-  if (!IS_LOCAL) {
-    bLog('Webcam disponibile solo in locale', 'er');
-    return;
-  }
+  if (!IS_LOCAL) { bLog('Webcam disponibile solo in locale', 'er'); return; }
   try {
     camStream = await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720}});
     const v=$('videoEl'); v.srcObject=camStream;
@@ -681,7 +682,6 @@ function captureForOsint() {
   },'image/jpeg',.9);
 }
 
-// ─── PHOTO PREVIEW ─────────────────────────────────────────
 function setPhotoPreview(src) {
   const p=$('photoPreview');
   p.innerHTML=`<img src="${src}" alt="preview">`;
@@ -690,9 +690,7 @@ function setPhotoPreview(src) {
 async function handleFileSelect() {
   const f=$('targetFile').files[0]; if(!f)return;
   bLog('Immagine selezionata: '+f.name,'info');
-  // Mostra anteprima immediata
   setPhotoPreview(URL.createObjectURL(f));
-  // Converti in JPEG
   capturedImageBlob = await toJpegBlob(f);
   bLog('Immagine pronta ('+Math.round(capturedImageBlob.size/1024)+'KB)','ok');
 }
@@ -742,9 +740,15 @@ async function runOsintFull() {
     const r2=await API('/osint/social',{method:'POST',headers:{'Authorization':'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify({name,run_maigret:false})});
     const d2=await safeJson(r2);
     if(r2.ok){
-      const found=(d2.by_name?.platforms||[]).filter(p=>p.found);
-      addReason(`Social: ${found.length} profili trovati`,found.length>0?'found':'step');
-      found.forEach(p=>addEvidence('social','profile',p.url||'',p.platform,.75));
+      // platforms è un dict {platform: {exists, url, results:[]}}
+      const platforms = d2.by_name?.platforms || {};
+      const platformList = Array.isArray(platforms) ? platforms : Object.values(platforms);
+      const found = platformList.filter(p => p && (p.exists || (p.results && p.results.length > 0)));
+      addReason(`Social: ${found.length} profili/risultati trovati`,found.length>0?'found':'step');
+      found.forEach(p=>{
+        if(p.url) addEvidence(p.platform||'social','profile',p.url,p.platform,.75);
+        (p.results||[]).forEach(r=>addEvidence(p.platform||'social','search',r.url,r.title,.5));
+      });
     }
 
     advance('Pipeline completa + risk score...');
@@ -778,7 +782,6 @@ async function runOsintFull() {
 
 function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
 
-// ─── EVIDENCE TABLE ─────────────────────────────────────────
 function addEvidence(src,kind,url,label,conf){
   const tb=$('evidenceTable');
   if(tb.querySelector('[colspan]'))tb.innerHTML='';
@@ -789,7 +792,6 @@ function addEvidence(src,kind,url,label,conf){
   tb.appendChild(tr);
 }
 
-// ─── GRAPH ──────────────────────────────────────────────────
 let graphData=null;
 function buildGraphFromData(data,name){
   const nodes=[],edges=[],pid='person:'+name;
@@ -846,7 +848,6 @@ function renderGraph(){
   });
 }
 
-// ─── STATS ──────────────────────────────────────────────────
 async function loadStats(){
   try{
     const r=await API('/osint/stats');
@@ -868,7 +869,6 @@ function updateRiskGauge(score){
   $('riskPct').textContent=pct+'%';
 }
 
-// ─── PDF ─────────────────────────────────────────────────────
 async function generatePdf(){
   const name=$('pdfName').value.trim();
   const fi=$('pdfFile');
@@ -900,7 +900,6 @@ function setPdfStatus(msg,cls){
   const el=$('pdfStatus');el.textContent=msg;el.className='pdf-status '+cls;
 }
 
-// ─── INIT ──────────────────────────────────────────────────────
 initProgress();
 initWebcamUI();
 bLog('Dashboard v2 — inserisci nome + foto, premi Analizza','info');
