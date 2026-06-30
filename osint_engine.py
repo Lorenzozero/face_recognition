@@ -25,7 +25,10 @@ from PIL import Image
 
 
 OSINT_ENABLE_EXTERNAL = os.getenv("OSINT_ENABLE_EXTERNAL", "true").lower() == "true"
-OSINT_TIMEOUT = int(os.getenv("OSINT_TIMEOUT", "30"))
+# Default 8s per singola fonte — le 3 fonti girano in parallelo entro 20s totali
+OSINT_TIMEOUT = int(os.getenv("OSINT_TIMEOUT", "8"))
+# Timeout globale per tutto il gather (deve stare sotto i ~24s di Railway)
+OSINT_GLOBAL_TIMEOUT = int(os.getenv("OSINT_GLOBAL_TIMEOUT", "20"))
 
 
 @dataclass
@@ -45,7 +48,8 @@ class OsintEngine:
 
     Comportamento configurabile via ENV:
     - OSINT_ENABLE_EXTERNAL=false -> niente chiamate esterne, solo link generati
-    - OSINT_TIMEOUT=30            -> timeout httpx per motori esterni
+    - OSINT_TIMEOUT=8             -> timeout httpx per singola fonte (default 8s)
+    - OSINT_GLOBAL_TIMEOUT=20     -> timeout totale gather (default 20s, sotto 24s Railway)
     """
 
     HEADERS = {
@@ -55,21 +59,17 @@ class OsintEngine:
     }
 
     def __init__(self, timeout: Optional[int] = None):
-        # Se non specificato, usa OSINT_TIMEOUT da ENV
         self.timeout = timeout if timeout is not None else OSINT_TIMEOUT
 
     async def search(self, image_bytes: bytes) -> Dict:
         """
         Esegue la ricerca su tutte le fonti in parallelo.
-        Restituisce un dict con risultati aggregati per fonte.
-
-        Se OSINT_ENABLE_EXTERNAL=false, salta Google Lens/Yandex/TinEye
-        e ritorna solo i link generati (_build_search_links).
+        Un timeout globale di OSINT_GLOBAL_TIMEOUT secondi garantisce che
+        la risposta arrivi sempre prima del cutoff di Railway (24s).
         """
         img_hash = hashlib.md5(image_bytes).hexdigest()[:8]
 
         if not OSINT_ENABLE_EXTERNAL:
-            # Solo link di ricerca (PimEyes, Bing, Google Images)
             links = await self._build_search_links(image_bytes)
             return {
                 "image_hash": img_hash,
@@ -79,13 +79,36 @@ class OsintEngine:
                 "external_calls": False,
             }
 
+        try:
+            result = await asyncio.wait_for(
+                self._gather_sources(image_bytes, img_hash),
+                timeout=OSINT_GLOBAL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            # Scaduto il timeout globale: ritorna i link statici senza errore
+            links = await self._build_search_links(image_bytes)
+            result = {
+                "image_hash": img_hash,
+                "timestamp": int(time.time()),
+                "sources": {
+                    "google_lens": {"results": [], "error": "timeout"},
+                    "yandex":      {"results": [], "error": "timeout"},
+                    "tineye":      {"results": [], "error": "timeout"},
+                    "search_links": links,
+                },
+                "total_results": len(links.get("results", [])),
+                "external_calls": True,
+                "timed_out": True,
+            }
+        return result
+
+    async def _gather_sources(self, image_bytes: bytes, img_hash: str) -> Dict:
         tasks = [
             self._search_google_lens(image_bytes),
             self._search_yandex(image_bytes),
             self._search_tineye(image_bytes),
             self._build_search_links(image_bytes),
         ]
-
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         output = {
@@ -95,7 +118,6 @@ class OsintEngine:
             "total_results": 0,
             "external_calls": True,
         }
-
         source_names = ["google_lens", "yandex", "tineye", "search_links"]
         for name, result in zip(source_names, results):
             if isinstance(result, Exception):
@@ -103,14 +125,9 @@ class OsintEngine:
             else:
                 output["sources"][name] = result
                 output["total_results"] += len(result.get("results", []))
-
         return output
 
     async def _search_google_lens(self, image_bytes: bytes) -> Dict:
-        """
-        Google Lens reverse image search.
-        Carica l'immagine e ottieni l'URL di ricerca visiva.
-        """
         try:
             async with httpx.AsyncClient(headers=self.HEADERS, timeout=self.timeout, follow_redirects=True) as client:
                 files = {"encoded_image": ("face.jpg", image_bytes, "image/jpeg")}
@@ -129,10 +146,6 @@ class OsintEngine:
             return {"results": [], "error": str(e)}
 
     async def _search_yandex(self, image_bytes: bytes) -> Dict:
-        """
-        Yandex Images reverse search.
-        Carica immagine e ottieni URL risultati.
-        """
         try:
             async with httpx.AsyncClient(headers=self.HEADERS, timeout=self.timeout, follow_redirects=True) as client:
                 files = {"upfile": ("face.jpg", image_bytes, "image/jpeg")}
@@ -151,9 +164,6 @@ class OsintEngine:
             return {"results": [], "error": str(e)}
 
     async def _search_tineye(self, image_bytes: bytes) -> Dict:
-        """
-        TinEye reverse image search.
-        """
         try:
             async with httpx.AsyncClient(headers=self.HEADERS, timeout=self.timeout, follow_redirects=True) as client:
                 files = {"image": ("face.jpg", image_bytes, "image/jpeg")}
@@ -178,14 +188,8 @@ class OsintEngine:
             return {"results": [], "error": str(e)}
 
     async def _build_search_links(self, image_bytes: bytes) -> Dict:
-        """
-        Genera link diretti per apertura manuale su varie piattaforme.
-        Usa data URL base64 dove supportato.
-        """
         b64 = base64.b64encode(image_bytes).decode()
-
         pimeyes_url = "https://pimeyes.com/en"
-
         return {
             "results": [
                 {"url": pimeyes_url, "title": "PimEyes — motore OSINT facciale (upload manuale)", "source": "pimeyes", "note": "Il più potente per ricerca facciale"},
