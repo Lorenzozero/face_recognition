@@ -4,3 +4,6 @@ dlib>=19.3.0
 numpy
 Pillow
 scipy>=0.17.0
+insightface>=0.7.3
+supervision>=0.21.0
+onnxruntime>=1.17.0
