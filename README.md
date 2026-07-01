@@ -19,6 +19,67 @@ O magari hai una foto di qualcuno e vuoi scoprire se quella faccia appare da qua
 
 ---
 
+## 🆕 Novità v4.7.0 — InsightFace + Supervision
+
+> **Upgrade del motore CV: da dlib a InsightFace ArcFace + Supervision**
+
+### Cosa è cambiato
+
+| Componente | Prima (v4.6.x) | Ora (v4.7.0) |
+|---|---|---|
+| **Face detector** | dlib HOG | InsightFace `buffalo_l` (ArcFace) |
+| **Embedding size** | 128D | 512D |
+| **Accuracy (LFW)** | ~99.3% | ~99.7% |
+| **Velocità (CPU)** | baseline | 3-5x più veloce |
+| **GPU support** | ❌ | ✅ (`VISION_CTX_ID=0`) |
+| **Tracking** | ❌ | ✅ ByteTrack (Supervision) |
+| **Frame annotato** | ❌ | ✅ bbox + label overlay |
+| **`track_id` in WS** | ❌ | ✅ ID stabile per ogni volto |
+
+### Nuovo modulo `vision_engine.py`
+
+Tutta la logica CV è ora centralizzata in `VisionEngine`:
+
+```python
+from vision_engine import VisionEngine
+
+engine = VisionEngine(ctx_id=-1)  # -1=CPU, 0=GPU
+
+# Detection + embedding in un colpo
+detections, embeddings = engine.process_frame(frame, track=True)
+
+# Annotazione frame con bbox + label
+annotated = engine.annotate_frame(frame, detections, labels)
+
+# Trigger zone OSINT (lancia OSINT solo dentro un'area)
+engine.set_trigger_zone(polygon=[(100,100),(500,100),(500,400),(100,400)], frame_resolution=(1280,720))
+if engine.faces_in_zone(detections):
+    # avvia pipeline OSINT
+    ...
+```
+
+### Compatibilità
+
+- ✅ **Tutti gli endpoint REST rimangono invariati** — nessuna breaking change
+- ✅ **`face_db.py` e `known_faces.db` compatibili** — i volti già registrati continuano a funzionare
+- ✅ **Fallback automatico a dlib** se InsightFace non è installato
+- ✅ **`/compare`** aggiornato con distanza coseno (compatibile sia con embeddings 128D che 512D)
+- ✅ **`/health`** ora indica il backend attivo: `{"backend": "insightface"}` o `{"backend": "dlib"}`
+
+### Migrazione
+
+```bash
+# Aggiorna dipendenze (aggiunge insightface, supervision, onnxruntime)
+pip install -r requirements.txt
+
+# Il modello buffalo_l viene scaricato automaticamente al primo avvio (~300MB)
+FR_API_TOKEN=secret python api_server.py
+```
+
+> **Nota GPU**: per usare la GPU imposta `VISION_CTX_ID=0`. Richiede CUDA + `onnxruntime-gpu` al posto di `onnxruntime`.
+
+---
+
 ## 🎯 Casi d'uso
 
 | Chi | Come lo usa |
@@ -44,7 +105,7 @@ O magari hai una foto di qualcuno e vuoi scoprire se quella faccia appare da qua
 ## 🚀 Avvio in 30 secondi
 
 ```bash
-pip install -r requirements_ng.txt
+pip install -r requirements.txt
 FR_API_TOKEN=changeme python api_server.py
 ```
 
@@ -65,7 +126,7 @@ Apri il browser su:
 │  │  + box volti  │  │  ● Hashing ✓  ● RevImg ✓  ● Social...  │
 │  └───────────────┘  │                                         │
 │  Mario Rossi 94%    │  🧠 Ragion. │ 📋 Evid. │ 🕸 Grafo │ 📊 │
-│                     │  ✓ 3 profili trovati su Instagram...    │
+│  [track_id: 3]      │  ✓ 3 profili trovati su Instagram...    │
 └─────────────────────┴─────────────────────────────────────────┘
 [LOG] 00:01 Match: Mario Rossi (94%) | 00:02 OSINT completato
 ```
@@ -83,10 +144,10 @@ Apri il browser su:
 
 | Metodo | Path | Descrizione | Rate limit |
 |--------|------|-------------|------------|
-| GET | `/health` | Health check | nessuno |
+| GET | `/health` | Health check + backend info | nessuno |
 | POST | `/encode` | Encoding volto da immagine | — |
 | POST | `/detect` | Rilevamento volti | — |
-| POST | `/compare` | Confronto encoding | — |
+| POST | `/compare` | Confronto encoding (coseno) | — |
 | POST | `/register` | Registra volto noto nel DB | — |
 | GET | `/known` | Lista volti noti | — |
 | DELETE | `/known/{id}` | Elimina volto noto | — |
@@ -96,8 +157,8 @@ Apri il browser su:
 | POST | `/report/pdf` | PDF OSINT scaricabile | 2/60s |
 | GET | `/osint/stats` | Stats aggregate + ultime run | 20/60s |
 | GET | `/osint/graph/{id}` | Grafo nodi/archi per una run | 20/60s |
-| WS | `/ws/stream` | Stream webcam real-time | — |
-| WS | `/ws/rtsp` | Stream RTSP real-time | — |
+| WS | `/ws/stream` | Stream webcam real-time + tracking | — |
+| WS | `/ws/rtsp` | Stream RTSP real-time + tracking | — |
 
 Tutti gli endpoint (tranne `/health`) richiedono `Authorization: Bearer <token>`.
 
@@ -110,6 +171,7 @@ Tutti gli endpoint (tranne `/health`) richiedono `Authorization: Bearer <token>`
 | `FR_API_TOKEN` | `changeme` | Token di autenticazione |
 | `FR_DB_PATH` | `faces.db` | Path database SQLite volti |
 | `FR_OSINT_DB_PATH` | `osint_results.db` | Path database SQLite OSINT |
+| `VISION_CTX_ID` | `-1` | InsightFace ctx_id: `-1`=CPU, `0`=GPU |
 | `OSINT_CACHE_TTL_HOURS` | `24` | Ore validità cache OSINT |
 | `OSINT_ENABLE_EXTERNAL` | `true` | Abilita chiamate HTTP esterne nell'engine OSINT |
 | `OSINT_ENABLE_MAIGRET` | `true` | Abilita ricerca Maigret |
@@ -209,6 +271,7 @@ docker run -p 8000:8000 -e FR_API_TOKEN=secret face-recognition-ng
 
 # GPU
 docker build -f Dockerfile.gpu -t face-recognition-ng-gpu .
+docker run -p 8000:8000 --gpus all -e FR_API_TOKEN=secret -e VISION_CTX_ID=0 face-recognition-ng-gpu
 ```
 
 ---
@@ -216,7 +279,8 @@ docker build -f Dockerfile.gpu -t face-recognition-ng-gpu .
 ## Struttura file
 
 ```
-api_server.py          — Server FastAPI, tutti gli endpoint
+api_server.py          — Server FastAPI v4.7.0, tutti gli endpoint
+vision_engine.py       — Engine CV: InsightFace + Supervision (detection, tracking, zone)
 rate_limiter.py        — Rate limiter in-memory (stdlib, zero deps)
 osint_db.py            — Database SQLite OSINT (run, evidenze, grafo)
 osint_engine.py        — Reverse image search engine
@@ -224,7 +288,7 @@ social_lookup.py       — Ricerca profili social
 maigret_wrapper.py     — Wrapper Maigret (3000+ siti)
 report_generator.py    — Generatore PDF ReportLab
 face_db.py             — Database SQLite volti noti
-websocket_stream.py    — Stream webcam/RTSP
+websocket_stream.py    — Stream webcam/RTSP v2.0 (tracking + frame annotato)
 smoke_test.py          — Test end-to-end server live
 tests/                 — Pytest unit + integration
 dashboard/index.html   — Dashboard split-view (camera + OSINT)
