@@ -1,5 +1,5 @@
 """
-face_recognition-ng — FastAPI REST + WebSocket Server v4.6.3
+face_recognition-ng — FastAPI REST + WebSocket Server v4.7.0
 Espone riconoscimento facciale via HTTP e WebSocket.
 
 Endpoint HTTP:
@@ -28,6 +28,7 @@ Variabili ENV:
   RATE_LIMIT_OSINT_SOCIAL  max req /osint/social (default: 10)
   RATE_LIMIT_OSINT_STATS   max req /osint/stats e /osint/graph (default: 20)
   RATE_LIMIT_CLEANUP_SECS  intervallo cleanup rate limiter in secondi (default: 300)
+  VISION_CTX_ID            InsightFace ctx_id: -1=CPU, 0=GPU (default: -1)
 
 Usage:
   FR_API_TOKEN=secret python api_server.py
@@ -51,7 +52,7 @@ from pydantic import BaseModel
 import uvicorn
 import PIL.Image
 
-import face_recognition
+from vision_engine import VisionEngine
 from face_db import FaceDatabase
 from websocket_stream import handle_webcam_stream, handle_rtsp_stream
 from osint_engine import OsintEngine
@@ -62,6 +63,7 @@ from osint_db import OsintDatabase
 from rate_limiter import RateLimiter, LIMIT_OSINT_IMAGE, LIMIT_OSINT_FULL, LIMIT_OSINT_SOCIAL, LIMIT_OSINT_STATS
 
 RATE_LIMIT_CLEANUP_SECS = int(os.environ.get("RATE_LIMIT_CLEANUP_SECS", "300"))
+VISION_CTX_ID = int(os.environ.get("VISION_CTX_ID", "-1"))
 
 # — Auth —
 API_TOKEN = os.environ.get("FR_API_TOKEN", "changeme")
@@ -89,7 +91,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="face_recognition-ng API",
     description="Riconoscimento facciale + OSINT via REST e WebSocket.",
-    version="4.6.3",
+    version="4.7.0",
     lifespan=lifespan,
 )
 
@@ -98,6 +100,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 if os.path.exists("dashboard"):
     app.mount("/dashboard", StaticFiles(directory="dashboard", html=True), name="dashboard")
 
+# — Singletons —
+vision = VisionEngine(ctx_id=VISION_CTX_ID)
 db = FaceDatabase()
 osint = OsintEngine()
 social = SocialLookup()
@@ -140,23 +144,8 @@ class OsintSearchRequest(BaseModel):
     username: Optional[str] = None
     run_maigret: bool = False
 
+
 # — Helper —
-
-def _safe_face_locations(img_array: np.ndarray) -> list:
-    try:
-        return face_recognition.face_locations(img_array)
-    except Exception:
-        return []
-
-
-def _safe_face_encodings(img_array: np.ndarray, locations: list = None) -> list:
-    try:
-        if locations is not None:
-            return face_recognition.face_encodings(img_array, locations)
-        return face_recognition.face_encodings(img_array)
-    except Exception:
-        return []
-
 
 def load_image_from_upload(file: UploadFile) -> np.ndarray:
     contents = file.file.read()
@@ -167,6 +156,26 @@ def load_image_from_upload(file: UploadFile) -> np.ndarray:
 def _get_image_hash(contents: bytes) -> str:
     import hashlib
     return hashlib.md5(contents).hexdigest()[:12]
+
+
+def _xyxy_to_locations(xyxy: np.ndarray) -> List[List[int]]:
+    """Converte xyxy (InsightFace) -> [top, right, bottom, left] (legacy API)."""
+    locs = []
+    for x1, y1, x2, y2 in xyxy.astype(int):
+        locs.append([int(y1), int(x2), int(y2), int(x1)])
+    return locs
+
+
+def _get_xyxy_from_detections(detections) -> np.ndarray:
+    """Estrae xyxy da sv.Detections o np.ndarray grezzo."""
+    if detections is None:
+        return np.empty((0, 4), dtype=np.float32)
+    try:
+        return detections.xyxy
+    except AttributeError:
+        if isinstance(detections, np.ndarray):
+            return detections
+        return np.empty((0, 4), dtype=np.float32)
 
 
 def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
@@ -185,51 +194,24 @@ def _build_evidence_from_reverse(reverse: dict) -> List[dict]:
 
 
 def _build_evidence_from_social(social_data) -> List[dict]:
-    """
-    Gestisce tutti i formati possibili di SocialLookup:
-      - search_by_name  -> {"platforms": {"instagram": {"results":[...]}, ...}}
-      - search_by_username -> {"platforms": {"instagram": {"exists":True,"url":...}}, "found":[...]}
-      - lista legacy [{"platform":..., "found":..., "url":...}]
-    """
     evidence = []
     if not social_data:
         return evidence
-
     if isinstance(social_data, dict):
         platforms_raw = social_data.get("platforms", {})
-        if isinstance(platforms_raw, dict):
-            items = list(platforms_raw.values())
-        elif isinstance(platforms_raw, list):
-            items = platforms_raw
-        else:
-            items = []
+        items = list(platforms_raw.values()) if isinstance(platforms_raw, dict) else (platforms_raw if isinstance(platforms_raw, list) else [])
     elif isinstance(social_data, list):
         items = social_data
     else:
         return evidence
-
     for item in items:
         if not isinstance(item, dict):
             continue
-        # search_by_username: {"platform": ..., "url": ..., "exists": True}
         if item.get("exists") and item.get("url"):
-            evidence.append({
-                "source": item.get("platform", "social"),
-                "url": item["url"],
-                "kind": "social_profile",
-                "confidence": 0.8,
-                "meta": {"platform": item.get("platform")},
-            })
-        # search_by_name: {"platform": ..., "results": [{"url": ..., "title": ...}]}
+            evidence.append({"source": item.get("platform", "social"), "url": item["url"], "kind": "social_profile", "confidence": 0.8, "meta": {"platform": item.get("platform")}})
         for r in item.get("results", []):
             if isinstance(r, dict) and r.get("url"):
-                evidence.append({
-                    "source": item.get("platform", "social"),
-                    "url": r["url"],
-                    "kind": "social_search",
-                    "confidence": 0.5,
-                    "meta": {"title": r.get("title"), "platform": item.get("platform")},
-                })
+                evidence.append({"source": item.get("platform", "social"), "url": r["url"], "kind": "social_search", "confidence": 0.5, "meta": {"title": r.get("title"), "platform": item.get("platform")}})
     return evidence
 
 
@@ -242,18 +224,7 @@ def _build_evidence_from_maigret(maigret_data: dict) -> List[dict]:
         for site in results:
             url = site.get("url", "")
             if url:
-                evidence.append({
-                    "source": f"maigret:{site.get('site', 'unknown')}",
-                    "url": url,
-                    "kind": "maigret_profile",
-                    "confidence": 0.75,
-                    "meta": {
-                        "username": username,
-                        "site": site.get("site"),
-                        "category": site.get("category"),
-                        "status": site.get("status"),
-                    },
-                })
+                evidence.append({"source": f"maigret:{site.get('site', 'unknown')}", "url": url, "kind": "maigret_profile", "confidence": 0.75, "meta": {"username": username, "site": site.get("site"), "category": site.get("category"), "status": site.get("status")}})
     return evidence
 
 
@@ -261,18 +232,12 @@ def _compute_risk_score(osint_data: dict) -> float:
     social_d = osint_data.get("social") or {}
     platforms = social_d.get("platforms") or {}
     if isinstance(platforms, dict):
-        found_social = sum(
-            1 for v in platforms.values()
-            if isinstance(v, dict) and (
-                v.get("exists") or len(v.get("results", [])) > 0
-            )
-        )
+        found_social = sum(1 for v in platforms.values() if isinstance(v, dict) and (v.get("exists") or len(v.get("results", [])) > 0))
     elif isinstance(platforms, list):
         found_social = sum(1 for p in platforms if isinstance(p, dict) and p.get("found"))
     else:
         found_social = 0
     social_score = min(1.0, found_social / 10.0) * 0.4
-
     maigret_d = osint_data.get("maigret") or {}
     maigret_hits = 0
     if isinstance(maigret_d, dict):
@@ -280,44 +245,45 @@ def _compute_risk_score(osint_data: dict) -> float:
             results = data.get("results", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             maigret_hits += len(results)
     maigret_score = min(1.0, maigret_hits / 20.0) * 0.4
-
     reverse = osint_data.get("reverse_image") or {}
     sources = reverse.get("sources", {})
     rev_hits = sum(len(s.get("results", [])) for s in sources.values())
     reverse_score = min(1.0, rev_hits / 10.0) * 0.2
-
     return round(social_score + maigret_score + reverse_score, 3)
 
 
 # — Health & root —
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "4.6.3"}
+    return {"status": "ok", "version": "4.7.0", "backend": "insightface" if vision.use_insightface else "dlib"}
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.6.3"}
+    return FileResponse("dashboard/index.html") if os.path.exists("dashboard/index.html") else {"msg": "face_recognition-ng v4.7.0"}
 
 
 # — Endpoint core riconoscimento —
 @app.post("/encode", response_model=EncodeResponse)
 def encode_face(file: UploadFile = File(...), token: str = Depends(verify_token)):
     img = load_image_from_upload(file)
-    locations = _safe_face_locations(img)
-    encodings = _safe_face_encodings(img, locations)
+    detections, embeddings = vision.process_frame(img)
+    xyxy = _get_xyxy_from_detections(detections)
+    locations = _xyxy_to_locations(xyxy) if len(xyxy) > 0 else []
     return EncodeResponse(
-        faces_found=len(encodings),
-        encodings=[e.tolist() for e in encodings],
-        locations=[list(loc) for loc in locations],
+        faces_found=len(embeddings),
+        encodings=[e.tolist() for e in embeddings],
+        locations=locations,
     )
 
 
 @app.post("/detect", response_model=DetectResponse)
 def detect_faces(file: UploadFile = File(...), token: str = Depends(verify_token)):
     img = load_image_from_upload(file)
-    locations = _safe_face_locations(img)
-    return DetectResponse(faces_found=len(locations), locations=[list(loc) for loc in locations])
+    detections, _ = vision.process_frame(img)
+    xyxy = _get_xyxy_from_detections(detections)
+    locations = _xyxy_to_locations(xyxy) if len(xyxy) > 0 else []
+    return DetectResponse(faces_found=len(locations), locations=locations)
 
 
 @app.post("/compare", response_model=CompareResponse)
@@ -325,8 +291,14 @@ def compare_faces(body: CompareRequest, token: str = Depends(verify_token)):
     enc_a = np.array(body.encoding_a)
     enc_b = np.array(body.encoding_b)
     try:
-        distances = face_recognition.face_distance([enc_a], enc_b)
-        distance = float(distances[0])
+        # Distanza coseno (compatibile con embeddings InsightFace 512D e dlib 128D)
+        norm_a = np.linalg.norm(enc_a)
+        norm_b = np.linalg.norm(enc_b)
+        if norm_a == 0 or norm_b == 0:
+            distance = 1.0
+        else:
+            cosine_sim = np.dot(enc_a, enc_b) / (norm_a * norm_b)
+            distance = float(1.0 - cosine_sim)
     except Exception:
         distance = 1.0
     return CompareResponse(match=distance <= body.tolerance, distance=round(distance, 4))
@@ -339,10 +311,10 @@ def register_face(
     token: str = Depends(verify_token),
 ):
     img = load_image_from_upload(file)
-    encodings = _safe_face_encodings(img)
-    if not encodings:
+    _, embeddings = vision.process_frame(img)
+    if not embeddings:
         raise HTTPException(status_code=400, detail="Nessun volto trovato nell'immagine")
-    face_id = db.register(name, encodings[0])
+    face_id = db.register(name, embeddings[0])
     return RegisterResponse(id=face_id, name=name, message=f"Volto di '{name}' registrato con ID {face_id}")
 
 
@@ -365,7 +337,9 @@ async def osint_image_search(request: Request, file: UploadFile = File(...), tok
     contents = await file.read()
     try:
         img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-        locations = _safe_face_locations(img_array)
+        detections, _ = vision.process_frame(img_array)
+        xyxy = _get_xyxy_from_detections(detections)
+        locations = _xyxy_to_locations(xyxy)
     except Exception:
         img_array = None
         locations = []
@@ -430,7 +404,9 @@ async def osint_full(request: Request, name: str = Form(...), file: UploadFile =
     contents = await file.read()
     try:
         img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-        locations = _safe_face_locations(img_array)
+        detections, _ = vision.process_frame(img_array)
+        xyxy = _get_xyxy_from_detections(detections)
+        locations = _xyxy_to_locations(xyxy)
     except Exception:
         locations = []
     image_hash = _get_image_hash(contents)
@@ -464,7 +440,9 @@ async def generate_pdf_report(request: Request, name: str = Form(...), file: Upl
     contents = await file.read()
     try:
         img_array = np.array(PIL.Image.open(io.BytesIO(contents)).convert("RGB"))
-        locations = _safe_face_locations(img_array)
+        detections, _ = vision.process_frame(img_array)
+        xyxy = _get_xyxy_from_detections(detections)
+        locations = _xyxy_to_locations(xyxy)
     except Exception:
         img_array = None
         locations = []
@@ -517,12 +495,12 @@ async def osint_graph(run_id: int, request: Request, token: str = Depends(verify
 
 @app.websocket("/ws/stream")
 async def websocket_webcam(websocket: WebSocket):
-    await handle_webcam_stream(websocket)
+    await handle_webcam_stream(websocket, vision)
 
 
 @app.websocket("/ws/rtsp")
 async def websocket_rtsp(websocket: WebSocket, url: str = Query(...)):
-    await handle_rtsp_stream(websocket, url)
+    await handle_rtsp_stream(websocket, url, vision)
 
 
 if __name__ == "__main__":
